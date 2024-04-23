@@ -30,8 +30,9 @@ impl ProxyHttp for ProxyApp {
         let host_config = self
             .host_configs
             .iter()
-            .find(|x| x.proxy_hostname == host_header)
+            .find(|x| x.proxy_hostname == host_header || x.proxy_addr == host_header)
             .unwrap();
+
         let proxy_to = HttpPeer::new(
             host_config.proxy_addr.as_str(),
             host_config.proxy_tls,
