@@ -1,90 +1,77 @@
-// Copyright 2024 Cloudflare, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-// http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+#[global_allocator]
+static GLOBAL: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
-use async_trait::async_trait;
-use log::info;
-use std::{sync::Arc, time::Duration};
+use pingora::{
+    server::{configuration::Opt, Server},
+    services::{listening::Service as ListeningService, Service},
+};
+use service::{HostConfigPlain, HostConfigTls};
+use std::env;
 use structopt::StructOpt;
 
-use pingora::prelude::*;
+mod app;
+mod service;
 
-pub struct LB(Arc<LoadBalancer<RoundRobin>>);
+pub fn main() {
+    let http_port = env::var("HTTP_PORT").unwrap_or("80".to_owned());
+    let https_port = env::var("HTTPS_PORT").unwrap_or("443".to_owned());
 
-#[async_trait]
-impl ProxyHttp for LB {
-    type CTX = ();
-    fn new_ctx(&self) -> Self::CTX {}
-
-    async fn upstream_peer(&self, _session: &mut Session, _ctx: &mut ()) -> Result<Box<HttpPeer>> {
-        let upstream = self
-            .0
-            .select(b"", 256) // hash doesn't matter
-            .unwrap();
-
-        info!("upstream peer is: {:?}", upstream);
-
-        let peer = Box::new(HttpPeer::new(upstream, true, "one.one.one.one".to_string()));
-        Ok(peer)
+    if env::var("RUST_LOG").is_err() {
+        env::set_var("RUST_LOG", "pingora_reverse_proxy=debug");
     }
+    pretty_env_logger::init_timed();
 
-    async fn upstream_request_filter(
-        &self,
-        _session: &mut Session,
-        upstream_request: &mut RequestHeader,
-        _ctx: &mut Self::CTX,
-    ) -> Result<()> {
-        upstream_request
-            .insert_header("Host", "one.one.one.one")
-            .unwrap();
-        Ok(())
-    }
-}
-
-// RUST_LOG=INFO cargo run --example load_balancer
-fn main() {
-    env_logger::init();
-
-    // read command line arguments
-    let opt = Opt::from_args();
-    let mut my_server = Server::new(Some(opt)).unwrap();
+    let opt = Some(Opt::from_args());
+    let mut my_server = Server::new(opt).unwrap();
     my_server.bootstrap();
 
-    // 127.0.0.1:343" is just a bad server
-    let mut upstreams =
-        LoadBalancer::try_from_iter(["1.1.1.1:443", "1.0.0.1:443", "127.0.0.1:343"]).unwrap();
+    let proxy_service_ssl = service::proxy_service_tls(
+        &my_server.configuration,
+        &format!("0.0.0.0:{https_port}"),
+        vec![
+            HostConfigTls {
+                proxy_addr: "127.0.0.1:4000".to_owned(),
+                proxy_tls: false,
+                proxy_hostname: "somedomain.com".to_owned(),
+                cert_path: format!("{}/keys/some_domain_cert.crt", env!("CARGO_MANIFEST_DIR")),
+                key_path: format!("{}/keys/some_domain_key.pem", env!("CARGO_MANIFEST_DIR")),
+            },
+            HostConfigTls {
+                proxy_addr: "1.1.1.1:443".to_owned(),
+                proxy_tls: true,
+                proxy_hostname: "one.one.one.one".to_owned(),
+                cert_path: format!("{}/keys/one_cert.crt", env!("CARGO_MANIFEST_DIR")),
+                key_path: format!("{}/keys/one_key.pem", env!("CARGO_MANIFEST_DIR")),
+            },
+        ],
+    );
 
-    // We add health check in the background so that the bad server is never selected.
-    let hc = TcpHealthCheck::new();
-    upstreams.set_health_check(hc);
-    upstreams.health_check_frequency = Some(Duration::from_secs(1));
+    let proxy_service_plain = service::proxy_service_plain(
+        &my_server.configuration,
+        &format!("0.0.0.0:{http_port}"),
+        vec![HostConfigPlain {
+            proxy_addr: "127.0.0.1:4000".to_owned(),
+            proxy_tls: false,
+            proxy_hostname: "someotherdomain.com".to_owned(),
+        }],
+    );
 
-    let background = background_service("health check", upstreams);
+    // let mut prometheus_service_http = ListeningService::prometheus_http_service();
+    // prometheus_service_http.add_tcp("127.0.0.1:6150");
 
-    let upstreams = background.task();
-
-    let mut lb = http_proxy_service(&my_server.configuration, LB(upstreams));
-    lb.add_tcp("0.0.0.0:6188");
-
-    let cert_path = format!("{}/tests/keys/server.crt", env!("CARGO_MANIFEST_DIR"));
-    let key_path = format!("{}/tests/keys/key.pem", env!("CARGO_MANIFEST_DIR"));
-
-    let mut tls_settings =
-        pingora::listeners::TlsSettings::intermediate(&cert_path, &key_path).unwrap();
-    tls_settings.enable_h2();
-    lb.add_tls_with_settings("0.0.0.0:6189", None, tls_settings);
-
-    my_server.add_service(lb);
-    my_server.add_service(background);
+    let services: Vec<Box<dyn Service>> = vec![
+        Box::new(proxy_service_ssl),
+        Box::new(proxy_service_plain),
+        // Box::new(prometheus_service_http),
+    ];
+    my_server.add_services(services);
     my_server.run_forever();
 }
+
+
+// // We add health check in the background so that the bad server is never selected.
+// let hc = TcpHealthCheck::new();
+// upstreams.set_health_check(hc);
+// upstreams.health_check_frequency = Some(Duration::from_secs(1));
+//
+// let background = background_service("health check", upstreams);
