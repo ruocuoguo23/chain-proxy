@@ -1,7 +1,7 @@
-use super::service::HostConfigPlain;
+use crate::service::service::HostConfigPlain;
 use async_trait::async_trait;
 use http::HeaderName;
-use log::debug;
+use log::info;
 use pingora::prelude::{HttpPeer, ProxyHttp, Result, Session};
 
 pub struct ProxyApp {
@@ -25,7 +25,7 @@ impl ProxyHttp for ProxyApp {
             .unwrap()
             .to_str()
             .unwrap();
-        debug!("host header: {host_header}");
+        info!("host header: {host_header}");
 
         let host_config = self
             .host_configs

@@ -6,8 +6,6 @@ use pingora::{
 };
 use structopt::StructOpt;
 
-use service::HostConfigPlain;
-
 #[global_allocator]
 static GLOBAL: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
@@ -17,19 +15,16 @@ mod service;
 pub fn main() {
     let http_port = env::var("HTTP_PORT").unwrap_or("80".to_owned());
 
-    if env::var("RUST_LOG").is_err() {
-        env::set_var("RUST_LOG", "pingora_reverse_proxy=debug");
-    }
-    pretty_env_logger::init_timed();
+    env_logger::init();
 
     let opt = Some(Opt::from_args());
     let mut my_server = Server::new(opt).unwrap();
     my_server.bootstrap();
 
-    let proxy_service_plain = service::proxy_service_plain(
+    let proxy_service_plain = service::service::proxy_service_plain(
         &my_server.configuration,
         &format!("0.0.0.0:{http_port}"),
-        vec![HostConfigPlain {
+        vec![service::service::HostConfigPlain {
             proxy_addr: "127.0.0.1:4000".to_owned(),
             proxy_tls: false,
             proxy_hostname: "someotherdomain.com".to_owned(),
