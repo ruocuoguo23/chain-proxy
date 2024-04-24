@@ -1,19 +1,38 @@
-use serde::{Deserialize, Serialize};
+use std::error::Error;
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
-use std::error::Error;
+
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
-struct Node {
+pub struct Node {
     #[serde(rename = "Address")]
     address: String,
     #[serde(rename = "Priority")]
     priority: i32,
 }
 
+impl Node {
+    pub fn host(&self) -> &str {
+        self.address.split(':').next().unwrap()
+    }
+
+    pub fn port(&self) -> u16 {
+        self.address.split(':').nth(1).unwrap().parse().unwrap()
+    }
+
+    pub fn tls(&self) -> bool {
+        self.address.starts_with("https")
+    }
+
+    pub fn hostname(&self) -> &str {
+        self.host()
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
-struct Chain {
+pub struct Chain {
     #[serde(rename = "Name")]
     name: String,
     #[serde(rename = "Listen")]
@@ -26,25 +45,50 @@ struct Chain {
     nodes: Vec<Node>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct Config {
+impl Chain {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn listen(&self) -> u16 {
+        self.listen
+    }
+
+    pub fn interval(&self) -> u64 {
+        self.interval
+    }
+
+    pub fn block_gap(&self) -> u64 {
+        self.block_gap
+    }
+
+    pub fn nodes(&self) -> &Vec<Node> {
+        &self.nodes
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct Config {
     #[serde(rename = "Chains")]
-    chains: Vec<Chain>,
+    pub(crate) chains: Vec<Chain>,
 }
 
 impl Config {
-    pub fn load_config<P: AsRef<Path>>(path: P) -> Result<Self, Box<dyn Error>> {
+    pub fn load_config<P: AsRef<Path>>(path: P) -> Result<(), Box<dyn Error>> {
         let mut file = File::open(path)?;
         let mut contents = String::new();
         file.read_to_string(&mut contents)?;
         let config = serde_yaml::from_str(&contents)?;
-        Ok(config)
+        *crate::CONFIG.write().unwrap() = config;
+
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use std::io::Write;
+
     use super::*;
 
     // Helper function to create a temporary config file
@@ -83,16 +127,20 @@ Chains:
         let file = create_temp_config(yaml_content).unwrap();
 
         // Load the config from the temporary file
-        let config = Config::load_config(file.path()).unwrap();
+        assert!(Config::load_config(file.path()).is_ok());
 
+        let config = crate::CONFIG.read().unwrap();
         // Assert the config values
         assert_eq!(config.chains.len(), 2);
-        assert_eq!(config.chains[0].name, "solana");
-        assert_eq!(config.chains[0].listen, 1017);
-        assert_eq!(config.chains[0].interval, 20);
-        assert_eq!(config.chains[0].block_gap, 20);
-        assert_eq!(config.chains[0].nodes.len(), 2);
-        assert_eq!(config.chains[0].nodes[0].address, "https://example.com/solana");
-        assert_eq!(config.chains[0].nodes[0].priority, 1);
+        assert_eq!(config.chains[0].name(), "solana");
+        assert_eq!(config.chains[0].listen(), 1017);
+        assert_eq!(config.chains[0].interval(), 20);
+        assert_eq!(config.chains[0].block_gap(), 20);
+        assert_eq!(config.chains[0].nodes().len(), 2);
+        assert_eq!(
+            config.chains[0].nodes()[0].address,
+            "https://example.com/solana"
+        );
+        assert_eq!(config.chains[0].nodes()[0].priority, 1);
     }
 }

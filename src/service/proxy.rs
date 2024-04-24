@@ -1,11 +1,8 @@
 use std::sync::Arc;
 
-use pingora::{
-    prelude::*,
-    server::configuration::ServerConf,
-};
+use pingora::{prelude::*, server::configuration::ServerConf};
 
-use crate::app::{proxy};
+use crate::app::proxy;
 
 #[derive(Clone)]
 pub struct HostConfigPlain {
