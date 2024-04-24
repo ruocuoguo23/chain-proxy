@@ -1,4 +1,4 @@
-use crate::service::service::HostConfigPlain;
+use crate::service::proxy::HostConfigPlain;
 use async_trait::async_trait;
 use http::HeaderName;
 use log::info;

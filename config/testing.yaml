@@ -1,0 +1,19 @@
+Chains:
+  - Name: solana
+    Listen: 1017
+    Interval: 20
+    BlockGap: 20
+    Nodes:
+      - Address: https://tiniest-wandering-flower.solana-mainnet.quiknode.pro/3f2cf77b66958c08189f7d289df7d0740e554be2
+        Priority: 1
+      - Address: https://api.mainnet-beta.solana.com
+        Priority: 0
+  - Name: ethereum
+    Listen: 1090
+    Interval: 20
+    BlockGap: 20
+    Nodes:
+      - Address: https://tiniest-wandering-flower.solana-mainnet.quiknode.pro/3f2cf77b66958c08189f7d289df7d0740e554be2
+        Priority: 1
+      - Address: https://api.mainnet-beta.solana.com
+        Priority: 0

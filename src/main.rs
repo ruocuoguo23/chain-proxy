@@ -11,6 +11,7 @@ static GLOBAL: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
 mod app;
 mod service;
+mod config;
 
 pub fn main() {
     let http_port = env::var("HTTP_PORT").unwrap_or("80".to_owned());
@@ -21,10 +22,10 @@ pub fn main() {
     let mut my_server = Server::new(opt).unwrap();
     my_server.bootstrap();
 
-    let proxy_service_plain = service::service::proxy_service_plain(
+    let proxy_service_plain = service::proxy::proxy_service_plain(
         &my_server.configuration,
         &format!("0.0.0.0:{http_port}"),
-        vec![service::service::HostConfigPlain {
+        vec![service::proxy::HostConfigPlain {
             proxy_addr: "127.0.0.1:4000".to_owned(),
             proxy_tls: false,
             proxy_hostname: "someotherdomain.com".to_owned(),

@@ -4,17 +4,18 @@ version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-[features]
-lb = ["pingora/lb"]
-proxy = ["pingora/proxy"]
 
+[dev-dependencies]
+tempfile = "3.2.0"
 
 [dependencies]
 async-trait="0.1"
-pingora = { version = "0.1", features = [ "lb" ] }
+pingora = { version = "0.1", features = [ "lb", "proxy" ] }
 log = "0.4.21"
 structopt = "0.3.26"
 env_logger = "0.11.3"
 http = "1.1.0"
 pretty_env_logger = "0.5"
 jemallocator = "0.5"
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9.34"

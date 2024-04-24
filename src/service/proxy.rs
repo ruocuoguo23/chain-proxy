@@ -5,7 +5,7 @@ use pingora::{
     server::configuration::ServerConf,
 };
 
-use crate::app::{app};
+use crate::app::{proxy};
 
 #[derive(Clone)]
 pub struct HostConfigPlain {
@@ -19,7 +19,7 @@ pub fn proxy_service_plain(
     listen_addr: &str,
     host_configs: Vec<HostConfigPlain>,
 ) -> impl pingora::services::Service {
-    let proxy_app = app::ProxyApp::new(host_configs.clone());
+    let proxy_app = proxy::ProxyApp::new(host_configs.clone());
 
     // We add health check in the background so that the bad server is never selected.
     // let mut upstreams = LoadBalancer::new();
