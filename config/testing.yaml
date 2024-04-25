@@ -4,16 +4,16 @@ Chains:
     Interval: 20
     BlockGap: 20
     Nodes:
-      - Address: https://tiniest-wandering-flower.solana-mainnet.quiknode.pro/3f2cf77b66958c08189f7d289df7d0740e554be2
+      - Address: https://tiniest-wandering-flower.solana-mainnet.quiknode.pro
         Priority: 1
       - Address: https://api.mainnet-beta.solana.com
         Priority: 0
-  - Name: ethereum
+  - Name: smartchain
     Listen: 1090
     Interval: 20
     BlockGap: 20
     Nodes:
-      - Address: https://tiniest-wandering-flower.solana-mainnet.quiknode.pro/3f2cf77b66958c08189f7d289df7d0740e554be2
+      - Address: https://palpable-newest-county.bsc.quiknode.pro
         Priority: 1
-      - Address: https://api.mainnet-beta.solana.com
+      - Address: http://127.0.0.1:11006
         Priority: 0

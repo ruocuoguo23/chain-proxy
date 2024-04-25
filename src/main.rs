@@ -22,6 +22,7 @@ extern crate lazy_static;
 
 use crate::config::Config;
 use std::sync::RwLock;
+use url::Url;
 
 lazy_static! {
     pub static ref CONFIG: RwLock<Config> = RwLock::new(Config::default());
@@ -37,23 +38,51 @@ fn create_services_from_config(server_conf: &Arc<ServerConf>) -> Vec<Box<dyn Ser
     let config = CONFIG.read().unwrap();
     for chain in &config.chains {
         let http_port = chain.listen();
-        let host_configs = chain
-            .nodes()
-            .iter()
-            .map(|node| service::proxy::HostConfigPlain {
-                proxy_addr: format!("{}", node.address()),
+
+        // from chain config to host config
+        let mut host_configs = Vec::new();
+        for node in chain.nodes().iter() {
+            // parse node url
+            let node_url = node.address();
+            let url = Url::parse(node_url).unwrap();
+            if url.host_str().is_none() {
+                log::error!("Invalid node url: {node_url}");
+                continue;
+            }
+
+            let port = match url.scheme() {
+                "http" => url.port().unwrap_or(80),
+                "https" => url.port().unwrap_or(443),
+                _ => {
+                    log::error!("Invalid node url: {node_url}");
+                    continue;
+                }
+            };
+
+            let proxy_addr = format!("{}:{}", url.host_str().unwrap(), port);
+            let host_config = service::proxy::HostConfigPlain {
+                proxy_addr: format!("{}", proxy_addr),
                 proxy_tls: node.tls(),
                 proxy_hostname: node.hostname().unwrap_or_default().to_string(),
-            })
-            .collect();
+                priority: node.priority(),
+            };
+            host_configs.push(host_config);
+        }
+
         let chain_proxy_service = service::proxy::proxy_service_plain(
             server_conf,
             &format!("0.0.0.0:{http_port}"),
             host_configs,
         );
+
         let chain_name = chain.name();
+        let interval = chain.interval();
+        let block_gap = chain.block_gap();
         // print chain proxy info
-        log::info!("Chain {chain_name} proxy service created, listening on {http_port}",);
+        log::info!(
+            "Chain {chain_name} proxy service created, listening on {http_port}, \
+            interval: {interval}, block_gap: {block_gap}"
+        );
 
         services.push(Box::new(chain_proxy_service));
     }

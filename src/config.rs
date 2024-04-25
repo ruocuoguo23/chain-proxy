@@ -29,6 +29,10 @@ impl Node {
             .map(|host| host.to_string())
             .ok_or(ParseError::EmptyHost)
     }
+
+    pub fn priority(&self) -> i32 {
+        self.priority
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]

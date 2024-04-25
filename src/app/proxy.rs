@@ -27,18 +27,34 @@ impl ProxyHttp for ProxyApp {
             .unwrap();
         info!("host header: {host_header}");
 
-        let host_config = self
-            .host_configs
-            .iter()
-            .find(|x| x.proxy_hostname == host_header || x.proxy_addr == host_header)
-            .unwrap();
+        // Find the host config that matches the current state best
+        let mut best_host_config = None;
+        for host_config in &self.host_configs {
+            // first check priority
+            if best_host_config.is_none() {
+                best_host_config = Some(host_config);
+                continue;
+            }
 
+            if host_config.priority > best_host_config.as_ref().unwrap().priority {
+                best_host_config = Some(host_config);
+            }
+        }
+
+        if best_host_config.is_none() {
+            log::error!("No host config found");
+            panic!("No host config found");
+        }
+
+        let best_host_config = best_host_config.unwrap();
         let proxy_to = HttpPeer::new(
-            host_config.proxy_addr.as_str(),
-            host_config.proxy_tls,
-            host_config.proxy_hostname.clone(),
+            best_host_config.proxy_addr.as_str(),
+            best_host_config.proxy_tls,
+            best_host_config.proxy_hostname.clone(),
         );
         let peer = Box::new(proxy_to);
+        // log the selected peer
+        info!("Selected peer: {peer}");
         Ok(peer)
     }
 }

@@ -43,7 +43,7 @@ cargo build --release
    set the 'CONFIG_PATH' environment variable to the path of the config.yaml file
 
 ```sh
-CONFIG_PATH=./config/testing.toml cargo run --release
+CONFIG_PATH=path/to/config.yaml cargo run --release
 ```
 
 ### Configuration

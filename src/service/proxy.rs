@@ -9,6 +9,7 @@ pub struct HostConfigPlain {
     pub proxy_addr: String,
     pub proxy_tls: bool,
     pub proxy_hostname: String,
+    pub priority: i32,
 }
 
 pub fn proxy_service_plain(
