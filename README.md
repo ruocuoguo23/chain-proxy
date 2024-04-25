@@ -40,9 +40,10 @@ cargo build --release
 ```
 
 3. Run the proxy:
+   set the 'CONFIG_PATH' environment variable to the path of the config.yaml file
 
 ```sh
-cargo run --release
+CONFIG_PATH=./config/testing.toml cargo run --release
 ```
 
 ### Configuration

@@ -9,8 +9,8 @@ edition = "2021"
 tempfile = "3.2.0"
 
 [dependencies]
-async-trait="0.1"
-pingora = { version = "0.1", features = [ "lb", "proxy" ] }
+async-trait = "0.1"
+pingora = { version = "0.1", features = ["lb", "proxy"] }
 log = "0.4.21"
 structopt = "0.3.26"
 env_logger = "0.11.3"
@@ -20,3 +20,4 @@ jemallocator = "0.5"
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9.34"
 lazy_static = "1.4.0"
+url = "2.2.2"

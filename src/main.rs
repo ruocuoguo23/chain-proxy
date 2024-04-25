@@ -41,9 +41,9 @@ fn create_services_from_config(server_conf: &Arc<ServerConf>) -> Vec<Box<dyn Ser
             .nodes()
             .iter()
             .map(|node| service::proxy::HostConfigPlain {
-                proxy_addr: format!("{}:{}", node.host(), node.port()),
+                proxy_addr: format!("{}", node.address()),
                 proxy_tls: node.tls(),
-                proxy_hostname: node.hostname().to_string(),
+                proxy_hostname: node.hostname().unwrap_or_default().to_string(),
             })
             .collect();
         let chain_proxy_service = service::proxy::proxy_service_plain(
@@ -51,6 +51,9 @@ fn create_services_from_config(server_conf: &Arc<ServerConf>) -> Vec<Box<dyn Ser
             &format!("0.0.0.0:{http_port}"),
             host_configs,
         );
+        let chain_name = chain.name();
+        // print chain proxy info
+        log::info!("Chain {chain_name} proxy service created, listening on {http_port}",);
 
         services.push(Box::new(chain_proxy_service));
     }
@@ -64,7 +67,7 @@ pub fn main() {
 
     // load config
     let config_path = env::var("CONFIG_PATH").unwrap_or("config.yaml".to_owned());
-    match config::Config::load_config(config_path) {
+    match Config::load_config(config_path) {
         Ok(_) => {
             log::info!("Config loaded successfully");
         }

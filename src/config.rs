@@ -2,6 +2,7 @@ use std::error::Error;
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
+use url::{ParseError, Url};
 
 use serde::{Deserialize, Serialize};
 
@@ -14,20 +15,19 @@ pub struct Node {
 }
 
 impl Node {
-    pub fn host(&self) -> &str {
-        self.address.split(':').next().unwrap()
-    }
-
-    pub fn port(&self) -> u16 {
-        self.address.split(':').nth(1).unwrap().parse().unwrap()
+    pub fn address(&self) -> &str {
+        self.address.as_str()
     }
 
     pub fn tls(&self) -> bool {
         self.address.starts_with("https")
     }
 
-    pub fn hostname(&self) -> &str {
-        self.host()
+    pub fn hostname(&self) -> Result<String, ParseError> {
+        let url = Url::parse(self.address.as_str())?;
+        url.host_str()
+            .map(|host| host.to_string())
+            .ok_or(ParseError::EmptyHost)
     }
 }
 
