@@ -69,7 +69,7 @@ fn create_services_from_config(server_conf: &Arc<ServerConf>) -> Vec<Box<dyn Ser
             host_configs.push(host_config);
         }
 
-        let chain_proxy_service = service::proxy::proxy_service_plain(
+        let (chain_proxy_service, background) = service::proxy::proxy_service_plain(
             server_conf,
             &format!("0.0.0.0:{http_port}"),
             host_configs,
@@ -85,6 +85,7 @@ fn create_services_from_config(server_conf: &Arc<ServerConf>) -> Vec<Box<dyn Ser
         );
 
         services.push(Box::new(chain_proxy_service));
+        services.push(Box::new(background));
     }
 
     services

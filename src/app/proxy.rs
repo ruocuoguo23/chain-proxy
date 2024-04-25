@@ -1,16 +1,25 @@
 use crate::service::proxy::HostConfigPlain;
+
 use async_trait::async_trait;
 use http::HeaderName;
 use log::info;
-use pingora::prelude::{HttpPeer, ProxyHttp, Result, Session};
+use pingora::prelude::*;
+use std::sync::Arc;
 
 pub struct ProxyApp {
+    balancer: Arc<LoadBalancer<RoundRobin>>,
     host_configs: Vec<HostConfigPlain>,
 }
 
 impl ProxyApp {
-    pub fn new(host_configs: Vec<HostConfigPlain>) -> Self {
-        ProxyApp { host_configs }
+    pub fn new(
+        host_configs: Vec<HostConfigPlain>,
+        balancer: Arc<LoadBalancer<RoundRobin>>,
+    ) -> Self {
+        ProxyApp {
+            balancer,
+            host_configs,
+        }
     }
 }
 
@@ -27,10 +36,37 @@ impl ProxyHttp for ProxyApp {
             .unwrap();
         info!("host header: {host_header}");
 
+        // First select healthy upstream from the balancer, and then select the best one
+        let backends = self.balancer.backends();
+        let peers = backends.get_backend();
+        let healthy_peers = peers
+            .iter()
+            .filter(|p| backends.ready(p))
+            .collect::<Vec<_>>();
+
+        if healthy_peers.is_empty() {
+            log::error!("No healthy upstream found");
+            panic!("No healthy upstream found");
+        }
+
         // Find the host config that matches the current state best
         let mut best_host_config = None;
         for host_config in &self.host_configs {
-            // first check priority
+            let mut is_healthy = false;
+            // first check health
+            for peer in &healthy_peers {
+                let peer_addr = peer.addr.as_inet();
+                let peer_addr = peer_addr.unwrap().to_string();
+                if peer_addr == host_config.proxy_addr {
+                    is_healthy = true;
+                    break;
+                }
+            }
+            if !is_healthy {
+                continue;
+            }
+
+            // then check priority
             if best_host_config.is_none() {
                 best_host_config = Some(host_config);
                 continue;
