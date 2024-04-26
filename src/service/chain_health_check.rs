@@ -127,3 +127,45 @@ impl HealthCheck for ChainHealthCheck {
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use pingora::protocols::l4::socket::SocketAddr;
+
+    #[tokio::test]
+    async fn test_https_check() {
+        let https_check = ChainHealthCheck::new("one.one.one.one", true);
+
+        let backend = Backend {
+            addr: SocketAddr::Inet("1.1.1.1:443".parse().unwrap()),
+            weight: 1,
+        };
+
+        assert!(https_check.check(&backend).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_http_custom_check() {
+        let mut http_check = ChainHealthCheck::new("one.one.one.one", false);
+        http_check.validator = Some(Box::new(|resp: &ResponseHeader| {
+            if resp.status == 301 {
+                Ok(())
+            } else {
+                Error::e_explain(
+                    CustomCode("non 301 code", resp.status.as_u16()),
+                    "during http healthcheck",
+                )
+            }
+        }));
+
+        let backend = Backend {
+            addr: SocketAddr::Inet("1.1.1.1:80".parse().unwrap()),
+            weight: 1,
+        };
+
+        http_check.check(&backend).await.unwrap();
+
+        assert!(http_check.check(&backend).await.is_ok());
+    }
+}

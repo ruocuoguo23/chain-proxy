@@ -302,6 +302,7 @@ dependencies = [
  "serde_yaml 0.9.34+deprecated",
  "structopt",
  "tempfile",
+ "tokio",
  "url",
 ]
 
@@ -2225,6 +2226,7 @@ dependencies = [
  "libc",
  "mio",
  "num_cpus",
+ "parking_lot",
  "pin-project-lite",
  "signal-hook-registry",
  "socket2",
