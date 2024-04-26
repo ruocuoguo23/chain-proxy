@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use async_trait::async_trait;
 use pingora::connectors::http::Connector as HttpConnector;
 use pingora::http::{RequestHeader, ResponseHeader};
@@ -6,7 +8,6 @@ use pingora::lb::Backend;
 use pingora::prelude::HttpPeer;
 use pingora::upstreams::peer::Peer;
 use pingora::{CustomCode, Error, Result};
-use std::time::Duration;
 
 type Validator = Box<dyn Fn(&ResponseHeader) -> Result<()> + Send + Sync>;
 
@@ -54,13 +55,15 @@ impl ChainHealthCheck {
     /// * consecutive_failure: 1
     /// * reuse_connection: false
     /// * validator: `None`, any 200 response is considered successful
-    pub fn new(host: &str, tls: bool) -> Box<Self> {
-        let mut req = RequestHeader::build("GET", b"/", None).unwrap();
+    pub fn new(host: &str, tls: bool, method: &str, path: &str) -> Box<Self> {
+        let mut req = RequestHeader::build(method, path.as_bytes(), None).unwrap();
         req.append_header("Host", host).unwrap();
         let sni = if tls { host.into() } else { String::new() };
+
         let mut peer_template = HttpPeer::new("0.0.0.0:1", tls, sni);
         peer_template.options.connection_timeout = Some(Duration::from_secs(1));
         peer_template.options.read_timeout = Some(Duration::from_secs(1));
+
         Box::new(ChainHealthCheck {
             consecutive_success: 1,
             consecutive_failure: 1,
@@ -76,7 +79,7 @@ impl ChainHealthCheck {
 
 #[async_trait]
 impl HealthCheck for ChainHealthCheck {
-    async fn check(&self, target: &Backend) -> pingora::Result<()> {
+    async fn check(&self, target: &Backend) -> Result<()> {
         let mut peer = self.peer_template.clone();
         peer._address = target.addr.clone();
         if let Some(port) = self.port_override {
@@ -130,24 +133,26 @@ impl HealthCheck for ChainHealthCheck {
 
 #[cfg(test)]
 mod test {
-    use super::*;
     use pingora::protocols::l4::socket::SocketAddr;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_https_check() {
-        let https_check = ChainHealthCheck::new("one.one.one.one", true);
+        // create a health check that connects to httpbin.org over HTTPS
+        let chain_health_check = ChainHealthCheck::new("httpbin.org", true, "GET", "/get");
 
         let backend = Backend {
-            addr: SocketAddr::Inet("1.1.1.1:443".parse().unwrap()),
+            addr: SocketAddr::Inet("23.23.165.157:443".parse().unwrap()),
             weight: 1,
         };
 
-        assert!(https_check.check(&backend).await.is_ok());
+        assert!(chain_health_check.check(&backend).await.is_ok());
     }
 
     #[tokio::test]
     async fn test_http_custom_check() {
-        let mut http_check = ChainHealthCheck::new("one.one.one.one", false);
+        let mut http_check = ChainHealthCheck::new("one.one.one.one", false, "GET", "/get");
         http_check.validator = Some(Box::new(|resp: &ResponseHeader| {
             if resp.status == 301 {
                 Ok(())
@@ -163,7 +168,6 @@ mod test {
             addr: SocketAddr::Inet("1.1.1.1:80".parse().unwrap()),
             weight: 1,
         };
-
         http_check.check(&backend).await.unwrap();
 
         assert!(http_check.check(&backend).await.is_ok());

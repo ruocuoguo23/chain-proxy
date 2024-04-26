@@ -29,7 +29,7 @@ pub fn proxy_service_plain(
     let mut upstreams = LoadBalancer::try_from_iter(proxy_addresses).unwrap();
 
     // using chain health check
-    let chain_health_check = ChainHealthCheck::new("localhost", false);
+    let chain_health_check = ChainHealthCheck::new("localhost", false, "GET", "/get");
     upstreams.set_health_check(chain_health_check);
     upstreams.health_check_frequency = Some(std::time::Duration::from_secs(5));
 
