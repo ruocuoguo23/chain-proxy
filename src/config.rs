@@ -1,10 +1,9 @@
+use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 use url::{ParseError, Url};
-
-use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Node {
@@ -36,6 +35,24 @@ impl Node {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct HealthCheck {
+    #[serde(rename = "Path")]
+    path: String,
+    #[serde(rename = "Method")]
+    method: String,
+}
+
+impl HealthCheck {
+    pub fn path(&self) -> &str {
+        self.path.as_str()
+    }
+
+    pub fn method(&self) -> &str {
+        self.method.as_str()
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Chain {
     #[serde(rename = "Name")]
     name: String,
@@ -47,6 +64,8 @@ pub struct Chain {
     block_gap: u64,
     #[serde(rename = "Nodes")]
     nodes: Vec<Node>,
+    #[serde(rename = "HealthCheck")]
+    health_check: HealthCheck,
 }
 
 impl Chain {
@@ -68,6 +87,10 @@ impl Chain {
 
     pub fn nodes(&self) -> &Vec<Node> {
         &self.nodes
+    }
+
+    pub fn health_check(&self) -> &HealthCheck {
+        &self.health_check
     }
 }
 
@@ -116,6 +139,9 @@ Chains:
         Priority: 1
       - Address: https://api.mainnet-beta.solana.com
         Priority: 0
+    HealthCheck:
+      Path: /health1
+      Method: GET
   - Name: ethereum
     Listen: 1090
     Interval: 20
@@ -125,6 +151,9 @@ Chains:
         Priority: 1
       - Address: https://api.ethereum.org
         Priority: 0
+    HealthCheck:
+      Path: /health2
+      Method: GET
 "#;
 
         // Create a temporary config file
@@ -146,5 +175,8 @@ Chains:
             "https://example.com/solana"
         );
         assert_eq!(config.chains[0].nodes()[0].priority, 1);
+
+        assert_eq!(config.chains[0].health_check().path(), "/health1");
+        assert_eq!(config.chains[0].health_check().method(), "GET");
     }
 }

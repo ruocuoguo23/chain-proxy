@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use async_trait::async_trait;
 use pingora::connectors::http::Connector as HttpConnector;
 use pingora::http::{RequestHeader, ResponseHeader};
@@ -8,6 +6,7 @@ use pingora::lb::Backend;
 use pingora::prelude::HttpPeer;
 use pingora::upstreams::peer::Peer;
 use pingora::{CustomCode, Error, Result};
+use std::time::Duration;
 
 type Validator = Box<dyn Fn(&ResponseHeader) -> Result<()> + Send + Sync>;
 
@@ -133,9 +132,8 @@ impl HealthCheck for ChainHealthCheck {
 
 #[cfg(test)]
 mod test {
-    use pingora::protocols::l4::socket::SocketAddr;
-
     use super::*;
+    use pingora::protocols::l4::socket::SocketAddr;
 
     #[tokio::test]
     async fn test_https_check() {

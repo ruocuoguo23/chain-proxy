@@ -1,22 +1,22 @@
-use std::sync::Arc;
-
-use pingora::{prelude::*, server::configuration::ServerConf};
-
 use crate::app::proxy;
 use crate::service::chain_health_check::ChainHealthCheck;
+use pingora::{prelude::*, server::configuration::ServerConf};
+use std::sync::Arc;
 
 #[derive(Clone)]
-pub struct HostConfigPlain {
+pub struct ChainProxyConfig {
     pub proxy_addr: String,
     pub proxy_tls: bool,
     pub proxy_hostname: String,
     pub priority: i32,
+    pub path: String,
+    pub method: String,
 }
 
 pub fn proxy_service_plain(
     server_conf: &Arc<ServerConf>,
     listen_addr: &str,
-    host_configs: Vec<HostConfigPlain>,
+    host_configs: Vec<ChainProxyConfig>,
 ) -> (
     impl pingora::services::Service,
     impl pingora::services::Service,
@@ -29,7 +29,12 @@ pub fn proxy_service_plain(
     let mut upstreams = LoadBalancer::try_from_iter(proxy_addresses).unwrap();
 
     // using chain health check
-    let chain_health_check = ChainHealthCheck::new("localhost", false, "GET", "/get");
+    let chain_health_check = ChainHealthCheck::new(
+        "localhost",
+        false,
+        host_configs[0].path.as_str(),
+        host_configs[0].method.as_str(),
+    );
     upstreams.set_health_check(chain_health_check);
     upstreams.health_check_frequency = Some(std::time::Duration::from_secs(5));
 

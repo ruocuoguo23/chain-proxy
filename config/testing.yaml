@@ -8,6 +8,9 @@ Chains:
         Priority: 1
       - Address: https://api.mainnet-beta.solana.com
         Priority: 0
+    HealthCheck:
+      Path: /health
+      Method: GET
   - Name: smartchain
     Listen: 1090
     Interval: 20
@@ -17,3 +20,6 @@ Chains:
         Priority: 1
       - Address: http://127.0.0.1:11006
         Priority: 0
+    HealthCheck:
+      Path: /health
+      Method: GET

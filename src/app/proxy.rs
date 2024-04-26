@@ -1,5 +1,4 @@
-use crate::service::proxy::HostConfigPlain;
-
+use crate::service::proxy::ChainProxyConfig;
 use async_trait::async_trait;
 use http::HeaderName;
 use log::info;
@@ -8,12 +7,12 @@ use std::sync::Arc;
 
 pub struct ProxyApp {
     balancer: Arc<LoadBalancer<RoundRobin>>,
-    host_configs: Vec<HostConfigPlain>,
+    host_configs: Vec<ChainProxyConfig>,
 }
 
 impl ProxyApp {
     pub fn new(
-        host_configs: Vec<HostConfigPlain>,
+        host_configs: Vec<ChainProxyConfig>,
         balancer: Arc<LoadBalancer<RoundRobin>>,
     ) -> Self {
         ProxyApp {

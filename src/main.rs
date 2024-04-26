@@ -1,11 +1,10 @@
-use std::env;
-use std::sync::Arc;
-
 use pingora::server::configuration::ServerConf;
 use pingora::{
     server::{configuration::Opt, Server},
     services::Service,
 };
+use std::env;
+use std::sync::Arc;
 use structopt::StructOpt;
 
 // The `jemallocator` crate provides a wrapper around the jemalloc allocator.
@@ -60,11 +59,13 @@ fn create_services_from_config(server_conf: &Arc<ServerConf>) -> Vec<Box<dyn Ser
             };
 
             let proxy_addr = format!("{}:{}", url.host_str().unwrap(), port);
-            let host_config = service::proxy::HostConfigPlain {
+            let host_config = service::proxy::ChainProxyConfig {
                 proxy_addr: format!("{}", proxy_addr),
                 proxy_tls: node.tls(),
                 proxy_hostname: node.hostname().unwrap_or_default().to_string(),
                 priority: node.priority(),
+                path: chain.health_check().path().to_string(),
+                method: chain.health_check().method().to_string(),
             };
             host_configs.push(host_config);
         }
