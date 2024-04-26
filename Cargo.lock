@@ -299,6 +299,7 @@ dependencies = [
  "pingora",
  "pretty_env_logger",
  "serde",
+ "serde_json",
  "serde_yaml 0.9.34+deprecated",
  "structopt",
  "tempfile",

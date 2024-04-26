@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use async_trait::async_trait;
 use pingora::connectors::http::Connector as HttpConnector;
 use pingora::http::{RequestHeader, ResponseHeader};
@@ -5,11 +7,36 @@ use pingora::lb::health_check::HealthCheck;
 use pingora::lb::Backend;
 use pingora::prelude::HttpPeer;
 use pingora::upstreams::peer::Peer;
-use pingora::{CustomCode, Error, Result};
-use std::time::Duration;
+use pingora::{Custom, CustomCode, Error, Result};
+use serde::{Deserialize, Serialize};
 
 type Validator = Box<dyn Fn(&ResponseHeader) -> Result<()> + Send + Sync>;
+type ResponseBodyValidator = Box<dyn Fn(&[u8]) -> Result<()> + Send + Sync>;
 
+/// Define various response validators for different chain, like ethereum, bitcoin, etc.
+#[derive(Debug, Serialize, Deserialize)]
+struct EthJsonResponse {
+    /// The key to check in the JSON response
+    jsonrpc: String,
+    id: u64,
+    result: String,
+}
+
+fn eth_validator(body: &[u8]) -> Result<()> {
+    // try to parse the JSON response
+    let parsed = serde_json::from_slice(body);
+    if parsed.is_err() {
+        return Error::e_explain(Custom("invalid json"), "during http healthcheck");
+    }
+
+    let parsed: EthJsonResponse = parsed.unwrap();
+    // check if the JSON response is valid
+    if parsed.jsonrpc != "2.0" {
+        Error::e_explain(Custom("invalid jsonrpc"), "during http healthcheck")
+    } else {
+        Ok(())
+    }
+}
 /// HTTP health check
 ///
 /// This health check checks if it can receive the expected HTTP(s) response from the given backend.
@@ -35,14 +62,18 @@ pub struct ChainHealthCheck {
     pub reuse_connection: bool,
     /// The request header to send to the backend
     pub req: RequestHeader,
+
+    /// The request body to send to the backend
+    pub request_body: Option<Vec<u8>>,
+
     connector: HttpConnector,
     /// Optional field to define how to validate the response from the server.
     ///
     /// If not set, any response with a `200 OK` is considered a successful check.
     pub validator: Option<Validator>,
-    /// Sometimes the health check endpoint lives one a different port than the actual backend.
-    /// Setting this option allows the health check to perform on the given port of the backend IP.
-    pub port_override: Option<u16>,
+
+    /// Optional field to define how to validate the response body from the server.
+    pub response_body_validator: Option<ResponseBodyValidator>,
 }
 
 impl ChainHealthCheck {
@@ -50,6 +81,7 @@ impl ChainHealthCheck {
     /// * connect timeout: 1 second
     /// * read timeout: 1 second
     /// * req: a GET to the `/` of the given host name
+    /// * request_body: None
     /// * consecutive_success: 1
     /// * consecutive_failure: 1
     /// * reuse_connection: false
@@ -70,9 +102,22 @@ impl ChainHealthCheck {
             connector: HttpConnector::new(None),
             reuse_connection: false,
             req,
+            request_body: None,
             validator: None,
-            port_override: None,
+            response_body_validator: None,
         })
+    }
+
+    /// Set the request body to send to the backend
+    pub fn with_request_body(mut self, body: Vec<u8>) -> Box<Self> {
+        self.request_body = Some(body);
+        Box::new(self)
+    }
+
+    /// Set the response body validator
+    pub fn with_response_body_validator(mut self, validator: ResponseBodyValidator) -> Box<Self> {
+        self.response_body_validator = Some(validator);
+        Box::new(self)
     }
 }
 
@@ -81,14 +126,17 @@ impl HealthCheck for ChainHealthCheck {
     async fn check(&self, target: &Backend) -> Result<()> {
         let mut peer = self.peer_template.clone();
         peer._address = target.addr.clone();
-        if let Some(port) = self.port_override {
-            peer._address.set_port(port);
-        }
         let session = self.connector.get_http_session(&peer).await?;
 
         let mut session = session.0;
         let req = Box::new(self.req.clone());
         session.write_request_header(req).await?;
+
+        if let Some(body) = self.request_body.as_ref() {
+            session
+                .write_request_body(body.clone().into(), true)
+                .await?;
+        }
 
         if let Some(read_timeout) = peer.options.read_timeout {
             session.set_read_timeout(read_timeout);
@@ -107,8 +155,14 @@ impl HealthCheck for ChainHealthCheck {
             );
         };
 
-        while session.read_response_body().await?.is_some() {
+        let mut response_body = Vec::new();
+        while let Some(chunk) = session.read_response_body().await? {
             // drain the body if any
+            response_body.extend_from_slice(&chunk);
+
+            if let Some(validator) = self.response_body_validator.as_ref() {
+                validator(&response_body)?;
+            }
         }
 
         if self.reuse_connection {
@@ -132,8 +186,9 @@ impl HealthCheck for ChainHealthCheck {
 
 #[cfg(test)]
 mod test {
-    use super::*;
     use pingora::protocols::l4::socket::SocketAddr;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_https_check() {
