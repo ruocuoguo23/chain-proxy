@@ -1,17 +1,13 @@
-use std::time::Duration;
-
 use async_trait::async_trait;
-use pingora::connectors::http::Connector as HttpConnector;
-use pingora::http::{RequestHeader, ResponseHeader};
+use once_cell::sync::OnceCell;
 use pingora::lb::health_check::HealthCheck;
 use pingora::lb::Backend;
-use pingora::prelude::HttpPeer;
-use pingora::upstreams::peer::Peer;
-use pingora::{Custom, CustomCode, Error, Result};
+use pingora::{Custom, Error, Result};
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
-
-type Validator = Box<dyn Fn(&ResponseHeader) -> Result<()> + Send + Sync>;
-type ResponseBodyValidator = Box<dyn Fn(&[u8]) -> Result<()> + Send + Sync>;
+use std::sync::Arc;
+use std::time::Duration;
+type Validator = Box<dyn Fn(&[u8]) -> Result<()> + Send + Sync>;
 
 /// Define various response validators for different chain, like ethereum, bitcoin, etc.
 #[derive(Debug, Serialize, Deserialize)]
@@ -34,10 +30,12 @@ fn eth_validator(body: &[u8]) -> Result<()> {
     if parsed.jsonrpc != "2.0" {
         Error::e_explain(Custom("invalid jsonrpc"), "during http healthcheck")
     } else {
+        // log the result
+        log::info!("eth block number: {}", parsed.result);
         Ok(())
     }
 }
-/// HTTP health check
+/// Chain health check
 ///
 /// This health check checks if it can receive the expected HTTP(s) response from the given backend.
 pub struct ChainHealthCheck {
@@ -45,66 +43,48 @@ pub struct ChainHealthCheck {
     pub consecutive_success: usize,
     /// Number of failed checks to flip from healthy to unhealthy.
     pub consecutive_failure: usize,
-    /// How to connect to the backend.
-    ///
-    /// This field defines settings like the connect timeout and src IP to bind.
-    /// The SocketAddr of `peer_template` is just a placeholder which will be replaced by the
-    /// actual address of the backend when the health check runs.
-    ///
-    /// Set the `scheme` field to use HTTPs.
-    pub peer_template: HttpPeer,
-    /// Whether the underlying TCP/TLS connection can be reused across checks.
-    ///
-    /// * `false` will make sure that every health check goes through TCP (and TLS) handshakes.
-    /// Established connections sometimes hide the issue of firewalls and L4 LB.
-    /// * `true` will try to reuse connections across checks, this is the more efficient and fast way
-    /// to perform health checks.
-    pub reuse_connection: bool,
-    /// The request header to send to the backend
-    pub req: RequestHeader,
 
-    /// The request body to send to the backend
+    pub request_method: String,
+
+    pub request_url: String,
+
     pub request_body: Option<Vec<u8>>,
 
-    connector: HttpConnector,
+    pub request_timeout: Duration,
+
+    pub client: Arc<Client>,
+
     /// Optional field to define how to validate the response from the server.
     ///
     /// If not set, any response with a `200 OK` is considered a successful check.
     pub validator: Option<Validator>,
 
-    /// Optional field to define how to validate the response body from the server.
-    pub response_body_validator: Option<ResponseBodyValidator>,
+    pub host: String,
 }
 
 impl ChainHealthCheck {
     /// Create a new [ChainHealthCheck] with the following default settings
     /// * connect timeout: 1 second
     /// * read timeout: 1 second
-    /// * req: a GET to the `/` of the given host name
+    /// * req: a GET/POST to the given path of the given host name
     /// * request_body: None
     /// * consecutive_success: 1
     /// * consecutive_failure: 1
     /// * reuse_connection: false
     /// * validator: `None`, any 200 response is considered successful
-    pub fn new(host: &str, tls: bool, method: &str, path: &str) -> Box<Self> {
-        let mut req = RequestHeader::build(method, path.as_bytes(), None).unwrap();
-        req.append_header("Host", host).unwrap();
-        let sni = if tls { host.into() } else { String::new() };
-
-        let mut peer_template = HttpPeer::new("0.0.0.0:1", tls, sni);
-        peer_template.options.connection_timeout = Some(Duration::from_secs(1));
-        peer_template.options.read_timeout = Some(Duration::from_secs(1));
+    pub fn new(host: &str, path: &str, method: &str) -> Box<Self> {
+        let request_url = format!("{}{}", host, path);
 
         Box::new(ChainHealthCheck {
             consecutive_success: 1,
             consecutive_failure: 1,
-            peer_template,
-            connector: HttpConnector::new(None),
-            reuse_connection: false,
-            req,
+            request_method: method.to_string(),
+            request_url: request_url.to_string(),
             request_body: None,
+            request_timeout: Duration::from_secs(60),
+            client: Arc::new(Client::new()),
             validator: None,
-            response_body_validator: None,
+            host: host.to_string(),
         })
     }
 
@@ -115,61 +95,50 @@ impl ChainHealthCheck {
     }
 
     /// Set the response body validator
-    pub fn with_response_body_validator(mut self, validator: ResponseBodyValidator) -> Box<Self> {
-        self.response_body_validator = Some(validator);
+    pub fn with_response_body_validator(mut self, validator: Validator) -> Box<Self> {
+        self.validator = Some(validator);
         Box::new(self)
     }
 }
 
 #[async_trait]
 impl HealthCheck for ChainHealthCheck {
-    async fn check(&self, target: &Backend) -> Result<()> {
-        let mut peer = self.peer_template.clone();
-        peer._address = target.addr.clone();
-        let session = self.connector.get_http_session(&peer).await?;
+    async fn check(&self, _target: &Backend) -> Result<()> {
+        let client = self.client.clone();
 
-        let mut session = session.0;
-        let req = Box::new(self.req.clone());
-        session.write_request_header(req).await?;
-
-        if let Some(body) = self.request_body.as_ref() {
-            session
-                .write_request_body(body.clone().into(), true)
-                .await?;
-        }
-
-        if let Some(read_timeout) = peer.options.read_timeout {
-            session.set_read_timeout(read_timeout);
-        }
-
-        session.read_response_header().await?;
-
-        let resp = session.response_header().expect("just read");
-
-        if let Some(validator) = self.validator.as_ref() {
-            validator(resp)?;
-        } else if resp.status != 200 {
-            return Error::e_explain(
-                CustomCode("non 200 code", resp.status.as_u16()),
-                "during http healthcheck",
-            );
+        let method_result = reqwest::Method::from_bytes(self.request_method.as_bytes());
+        let method = match method_result {
+            Ok(m) => m,
+            Err(_e) => return Error::e_explain(Custom("invalid request method"), "reqwest error"),
         };
 
-        let mut response_body = Vec::new();
-        while let Some(chunk) = session.read_response_body().await? {
-            // drain the body if any
-            response_body.extend_from_slice(&chunk);
+        let request_builder = client
+            .request(method, &self.request_url)
+            .timeout(self.request_timeout);
 
-            if let Some(validator) = self.response_body_validator.as_ref() {
-                validator(&response_body)?;
+        let request_builder = if let Some(body) = self.request_body.as_ref() {
+            request_builder.body(body.clone())
+        } else {
+            request_builder
+        };
+
+        let response = request_builder.send().await;
+
+        let response = match response {
+            Ok(r) => r,
+            Err(_e) => return Error::e_explain(Custom("failed to send request"), "reqwest error"),
+        };
+
+        let response_body = response.bytes().await;
+        let response_body = match response_body {
+            Ok(b) => b,
+            Err(_e) => {
+                return Error::e_explain(Custom("failed to read response body"), "reqwest error")
             }
-        }
+        };
 
-        if self.reuse_connection {
-            let idle_timeout = peer.idle_timeout();
-            self.connector
-                .release_http_session(session, &peer, idle_timeout)
-                .await;
+        if let Some(validator) = self.validator.as_ref() {
+            validator(&response_body)?;
         }
 
         Ok(())
@@ -184,6 +153,17 @@ impl HealthCheck for ChainHealthCheck {
     }
 }
 
+static INIT: OnceCell<()> = OnceCell::new();
+
+// todo: move this to a common place
+pub fn initialize_logger() {
+    INIT.get_or_init(|| {
+        if let Err(e) = env_logger::builder().is_test(true).try_init() {
+            eprintln!("Logger already initialized: {}", e);
+        }
+    });
+}
+
 #[cfg(test)]
 mod test {
     use pingora::protocols::l4::socket::SocketAddr;
@@ -191,10 +171,11 @@ mod test {
     use super::*;
 
     #[tokio::test]
-    async fn test_https_check() {
-        // create a health check that connects to httpbin.org over HTTPS
-        let chain_health_check = ChainHealthCheck::new("httpbin.org", true, "GET", "/get");
+    async fn test_https_check_get() {
+        initialize_logger();
 
+        // create a health check that connects to httpbin.org over HTTPS
+        let chain_health_check = ChainHealthCheck::new("https://httpbin.org", "/get", "GET");
         let backend = Backend {
             addr: SocketAddr::Inet("23.23.165.157:443".parse().unwrap()),
             weight: 1,
@@ -204,24 +185,78 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_http_custom_check() {
-        let mut http_check = ChainHealthCheck::new("one.one.one.one", false, "GET", "/get");
-        http_check.validator = Some(Box::new(|resp: &ResponseHeader| {
-            if resp.status == 301 {
-                Ok(())
-            } else {
-                Error::e_explain(
-                    CustomCode("non 301 code", resp.status.as_u16()),
-                    "during http healthcheck",
-                )
-            }
-        }));
+    async fn test_https_check_post() {
+        initialize_logger();
 
+        // create a health check that connects to httpbin.org over HTTPS
+        let chain_health_check = ChainHealthCheck::new("https://httpbin.org", "/post", "POST");
+        let http_check = chain_health_check.with_request_body(
+            r#"
+               {
+                    "key":"value"
+               }
+               "#
+            .as_bytes()
+            .to_vec(),
+        );
         let backend = Backend {
-            addr: SocketAddr::Inet("1.1.1.1:80".parse().unwrap()),
+            addr: SocketAddr::Inet("23.23.165.157:443".parse().unwrap()),
             weight: 1,
         };
-        http_check.check(&backend).await.unwrap();
+
+        assert!(http_check.check(&backend).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_http_check_post() {
+        initialize_logger();
+
+        // create a health check that connects to httpbin.org over HTTPS
+        let chain_health_check =
+            ChainHealthCheck::new("http://127.0.0.1:11006", "/api/print-json", "POST");
+        let http_check = chain_health_check.with_request_body(
+            r#"
+               {
+                    "key":"value"
+               }
+               "#
+            .as_bytes()
+            .to_vec(),
+        );
+        let backend = Backend {
+            addr: SocketAddr::Inet("127.0.0.1:11006".parse().unwrap()),
+            weight: 1,
+        };
+
+        assert!(http_check.check(&backend).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_optimism_check() {
+        initialize_logger();
+        log::info!("running optimism check");
+        let http_check = ChainHealthCheck::new(
+            "https://practical-green-butterfly.optimism.quiknode.pro",
+            "/d02f8d49bde8ccbbcec3c9a8962646db998ade83",
+            "POST",
+        );
+        let http_check = http_check.with_response_body_validator(Box::new(eth_validator));
+        let http_check = http_check.with_request_body(
+            r#"
+                {
+                    "jsonrpc":"2.0",
+                    "method":"eth_blockNumber",
+                    "id":1
+               }
+               "#
+            .as_bytes()
+            .to_vec(),
+        );
+
+        let backend = Backend {
+            addr: SocketAddr::Inet("158.178.243.130:443".parse().unwrap()),
+            weight: 1,
+        };
 
         assert!(http_check.check(&backend).await.is_ok());
     }

@@ -31,7 +31,6 @@ pub fn proxy_service_plain(
     // using chain health check
     let chain_health_check = ChainHealthCheck::new(
         "localhost",
-        false,
         host_configs[0].path.as_str(),
         host_configs[0].method.as_str(),
     );
