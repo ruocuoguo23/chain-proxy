@@ -1,3 +1,4 @@
+use crate::config::ChainState;
 use async_trait::async_trait;
 use once_cell::sync::OnceCell;
 use pingora::lb::health_check::HealthCheck;
@@ -5,9 +6,9 @@ use pingora::lb::Backend;
 use pingora::{Custom, Error, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
-type Validator = Box<dyn Fn(&[u8]) -> Result<()> + Send + Sync>;
+type Validator = Box<dyn Fn(&[u8]) -> Result<u64> + Send + Sync>;
 
 /// Define various response validators for different chain, like ethereum, bitcoin, etc.
 #[derive(Debug, Serialize, Deserialize)]
@@ -18,7 +19,7 @@ struct EthJsonResponse {
     result: String,
 }
 
-pub(crate) fn eth_validator(body: &[u8]) -> Result<()> {
+pub(crate) fn eth_validator(body: &[u8]) -> Result<u64> {
     // try to parse the JSON response
     let parsed = serde_json::from_slice(body);
     if parsed.is_err() {
@@ -32,7 +33,13 @@ pub(crate) fn eth_validator(body: &[u8]) -> Result<()> {
     } else {
         // log the result
         log::info!("eth block number: {}", parsed.result);
-        Ok(())
+        // from hex string to u64
+        let block_number = u64::from_str_radix(&parsed.result[2..], 16);
+        if block_number.is_err() {
+            return Error::e_explain(Custom("invalid block number"), "during http healthcheck");
+        }
+
+        Ok(block_number.unwrap())
     }
 }
 /// Chain health check
@@ -43,6 +50,8 @@ pub struct ChainHealthCheck {
     pub consecutive_success: usize,
     /// Number of failed checks to flip from healthy to unhealthy.
     pub consecutive_failure: usize,
+
+    pub chain_state: Arc<Mutex<ChainState>>,
 
     pub request_method: String,
 
@@ -69,12 +78,13 @@ impl ChainHealthCheck {
     /// * consecutive_success: 1
     /// * consecutive_failure: 1
     /// * validator: `None`, any 200 response is considered successful
-    pub fn new(host: &str, path: &str, method: &str) -> Box<Self> {
+    pub fn new(host: &str, path: &str, method: &str, state: Arc<Mutex<ChainState>>) -> Box<Self> {
         let request_url = format!("{}{}", host, path);
 
         Box::new(ChainHealthCheck {
             consecutive_success: 1,
             consecutive_failure: 1,
+            chain_state: Arc::clone(&state),
             request_method: method.to_string(),
             request_url: request_url.to_string(),
             request_body: None,
@@ -147,7 +157,26 @@ impl HealthCheck for ChainHealthCheck {
         };
 
         if let Some(validator) = self.validator.as_ref() {
-            validator(&response_body)?;
+            let chain_state_result = validator(&response_body);
+            if chain_state_result.is_err() {
+                log::error!("failed to validate response body");
+                return Error::e_explain(
+                    Custom("failed to validate response body"),
+                    "validator error",
+                );
+            }
+
+            // update the chain state
+            let chain_state_result = chain_state_result.unwrap();
+            log::info!(
+                "updating chain state with new block number {}",
+                chain_state_result
+            );
+
+            {
+                let mut state = self.chain_state.lock().unwrap();
+                state.update_block_number(&self.host, chain_state_result);
+            }
         }
 
         Ok(())
@@ -186,7 +215,12 @@ mod test {
         initialize_logger();
 
         // create a health check that connects to httpbin.org over HTTPS
-        let chain_health_check = ChainHealthCheck::new("https://httpbin.org", "/get", "GET");
+        let chain_health_check = ChainHealthCheck::new(
+            "https://httpbin.org",
+            "/get",
+            "GET",
+            Arc::new(Mutex::new(ChainState::new())),
+        );
         let backend = Backend {
             addr: SocketAddr::Inet("23.23.165.157:443".parse().unwrap()),
             weight: 1,
@@ -200,7 +234,12 @@ mod test {
         initialize_logger();
 
         // create a health check that connects to httpbin.org over HTTPS
-        let chain_health_check = ChainHealthCheck::new("https://httpbin.org", "/post", "POST");
+        let chain_health_check = ChainHealthCheck::new(
+            "https://httpbin.org",
+            "/post",
+            "POST",
+            Arc::new(Mutex::new(ChainState::new())),
+        );
         let http_check = chain_health_check.with_request_body(
             r#"
                {
@@ -223,8 +262,12 @@ mod test {
         initialize_logger();
 
         // create a health check that connects to httpbin.org over HTTPS
-        let chain_health_check =
-            ChainHealthCheck::new("http://127.0.0.1:11006", "/api/print-json", "POST");
+        let chain_health_check = ChainHealthCheck::new(
+            "http://127.0.0.1:11006",
+            "/api/print-json",
+            "POST",
+            Arc::new(Mutex::new(ChainState::new())),
+        );
         let http_check = chain_health_check.with_request_body(
             r#"
                {
@@ -250,6 +293,7 @@ mod test {
             "https://practical-green-butterfly.optimism.quiknode.pro",
             "/d02f8d49bde8ccbbcec3c9a8962646db998ade83",
             "POST",
+            Arc::new(Mutex::new(ChainState::new())),
         );
         let http_check = http_check.with_response_body_validator(Box::new(eth_validator));
         let http_check = http_check.with_request_body(

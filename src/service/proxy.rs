@@ -1,4 +1,5 @@
 use crate::app::proxy;
+use crate::config::ChainState;
 use crate::service::chain_health_check::ChainHealthCheck;
 use pingora::lb::{
     selection::{BackendIter, BackendSelection},
@@ -7,7 +8,7 @@ use pingora::lb::{
 use pingora::{
     prelude::*, server::configuration::ServerConf, services::background::GenBackgroundService,
 };
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Debug)]
 pub struct ChainProxyConfig {
@@ -22,6 +23,7 @@ pub struct ChainProxyConfig {
 
 fn build_chain_cluster_service<S: BackendSelection>(
     chain_config: &ChainProxyConfig,
+    chain_state: Arc<Mutex<ChainState>>,
 ) -> GenBackgroundService<LoadBalancer<S>>
 where
     S: BackendSelection + 'static,
@@ -35,6 +37,7 @@ where
         chain_config.proxy_uri.as_str(),
         chain_config.path.as_str(),
         chain_config.method.as_str(),
+        chain_state,
     );
 
     // set health check validator and request body according to the chain type
@@ -70,11 +73,20 @@ pub fn new_chain_proxy_service(
     impl pingora::services::Service,
     impl pingora::services::Service,
 ) {
-    let cluster_one = build_chain_cluster_service::<RoundRobin>(&host_configs[0]);
-    let cluster_two = build_chain_cluster_service::<RoundRobin>(&host_configs[1]);
+    // first create shared chain state for proxy upstream selection
+    let chain_state = Arc::new(Mutex::new(ChainState::new()));
 
-    let proxy_app =
-        proxy::ProxyApp::new(host_configs.clone(), cluster_one.task(), cluster_two.task());
+    let cluster_one =
+        build_chain_cluster_service::<RoundRobin>(&host_configs[0], chain_state.clone());
+    let cluster_two =
+        build_chain_cluster_service::<RoundRobin>(&host_configs[1], chain_state.clone());
+
+    let proxy_app = proxy::ProxyApp::new(
+        host_configs.clone(),
+        cluster_one.task(),
+        cluster_two.task(),
+        chain_state,
+    );
     let mut service = http_proxy_service(server_conf, proxy_app);
     service.add_tcp(listen_addr);
 

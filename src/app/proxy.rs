@@ -1,9 +1,10 @@
+use crate::config::ChainState;
 use crate::service::proxy::ChainProxyConfig;
 use async_trait::async_trait;
 use http::HeaderName;
 use log::info;
 use pingora::prelude::*;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 pub struct ProxyApp {
     // currently we only support two clusters, maybe with different priority
@@ -11,6 +12,7 @@ pub struct ProxyApp {
     cluster_two: Arc<LoadBalancer<RoundRobin>>,
 
     host_configs: Vec<ChainProxyConfig>,
+    chain_state: Arc<Mutex<ChainState>>,
 }
 
 impl ProxyApp {
@@ -18,11 +20,13 @@ impl ProxyApp {
         host_configs: Vec<ChainProxyConfig>,
         cluster_one: Arc<LoadBalancer<RoundRobin>>,
         cluster_two: Arc<LoadBalancer<RoundRobin>>,
+        chain_state: Arc<Mutex<ChainState>>,
     ) -> Self {
         ProxyApp {
             cluster_one: cluster_one.clone(),
             cluster_two: cluster_two.clone(),
             host_configs,
+            chain_state: Arc::clone(&chain_state),
         }
     }
 }
@@ -33,6 +37,17 @@ impl ProxyHttp for ProxyApp {
     fn new_ctx(&self) {}
 
     async fn upstream_peer(&self, session: &mut Session, _ctx: &mut ()) -> Result<Box<HttpPeer>> {
+        // first check chain state of the cluster
+        {
+            let mut state = self.chain_state.lock().unwrap();
+            let block_numbers = state.get_block_numbers();
+
+            // Now you can iterate over the `block_numbers` HashMap reference
+            for (host_name, block_number) in block_numbers {
+                info!("Host: {}, Block Number: {}", host_name, block_number);
+            }
+        }
+
         let host_header = session
             .get_header(HeaderName::from_static("host"))
             .unwrap()
@@ -93,6 +108,7 @@ impl ProxyHttp for ProxyApp {
             best_host_config.proxy_hostname.clone(),
         );
         let peer = Box::new(proxy_to);
+
         // log the selected peer
         info!("Selected peer: {peer}");
         Ok(peer)

@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::error::Error;
 use std::fs::File;
 use std::io::Read;
@@ -109,6 +110,33 @@ impl Config {
         *crate::CONFIG.write().unwrap() = config;
 
         Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct ChainState {
+    // store chain node hostname and current block number
+    pub(crate) block_numbers: HashMap<String, u64>,
+}
+
+impl ChainState {
+    pub fn new() -> Self {
+        ChainState {
+            block_numbers: HashMap::new(),
+        }
+    }
+
+    pub fn update_block_number(&mut self, host_name: &str, block_number: u64) {
+        self.block_numbers
+            .insert(host_name.to_string(), block_number);
+    }
+
+    pub fn get_block_number(&self, host_name: &str) -> Option<&u64> {
+        self.block_numbers.get(host_name)
+    }
+
+    pub fn get_block_numbers(&self) -> &HashMap<String, u64> {
+        &self.block_numbers
     }
 }
 
