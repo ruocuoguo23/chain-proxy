@@ -1,25 +1,13 @@
 Chains:
-  - Name: solana
+  - Name: optimism
     Listen: 1017
     Interval: 20
     BlockGap: 20
     Nodes:
-      - Address: https://tiniest-wandering-flower.solana-mainnet.quiknode.pro
+      - Address: https://practical-green-butterfly.optimism.quiknode.pro/d02f8d49bde8ccbbcec3c9a8962646db998ade83
         Priority: 1
-      - Address: https://api.mainnet-beta.solana.com
+      - Address: https://mainnet.optimism.io/
         Priority: 0
     HealthCheck:
-      Path: /health
-      Method: GET
-  - Name: smartchain
-    Listen: 1090
-    Interval: 20
-    BlockGap: 20
-    Nodes:
-      - Address: https://palpable-newest-county.bsc.quiknode.pro
-        Priority: 1
-      - Address: http://127.0.0.1:11006
-        Priority: 0
-    HealthCheck:
-      Path: /health
-      Method: GET
+      Path: ""
+      Method: POST

@@ -18,7 +18,7 @@ struct EthJsonResponse {
     result: String,
 }
 
-fn eth_validator(body: &[u8]) -> Result<()> {
+pub(crate) fn eth_validator(body: &[u8]) -> Result<()> {
     // try to parse the JSON response
     let parsed = serde_json::from_slice(body);
     if parsed.is_err() {
@@ -64,13 +64,10 @@ pub struct ChainHealthCheck {
 
 impl ChainHealthCheck {
     /// Create a new [ChainHealthCheck] with the following default settings
-    /// * connect timeout: 1 second
-    /// * read timeout: 1 second
     /// * req: a GET/POST to the given path of the given host name
     /// * request_body: None
     /// * consecutive_success: 1
     /// * consecutive_failure: 1
-    /// * reuse_connection: false
     /// * validator: `None`, any 200 response is considered successful
     pub fn new(host: &str, path: &str, method: &str) -> Box<Self> {
         let request_url = format!("{}{}", host, path);
@@ -104,12 +101,20 @@ impl ChainHealthCheck {
 #[async_trait]
 impl HealthCheck for ChainHealthCheck {
     async fn check(&self, _target: &Backend) -> Result<()> {
+        log::info!("checking health of {}", self.host);
         let client = self.client.clone();
 
         let method_result = reqwest::Method::from_bytes(self.request_method.as_bytes());
         let method = match method_result {
             Ok(m) => m,
-            Err(_e) => return Error::e_explain(Custom("invalid request method"), "reqwest error"),
+            Err(e) => {
+                log::error!(
+                    "invalid request method: {}, error: {}",
+                    self.request_method,
+                    e
+                );
+                return Error::e_explain(Custom("invalid request method"), "reqwest error");
+            }
         };
 
         let request_builder = client
@@ -126,14 +131,18 @@ impl HealthCheck for ChainHealthCheck {
 
         let response = match response {
             Ok(r) => r,
-            Err(_e) => return Error::e_explain(Custom("failed to send request"), "reqwest error"),
+            Err(_e) => {
+                log::error!("failed to send request");
+                return Error::e_explain(Custom("failed to send request"), "reqwest error");
+            }
         };
 
         let response_body = response.bytes().await;
         let response_body = match response_body {
             Ok(b) => b,
             Err(_e) => {
-                return Error::e_explain(Custom("failed to read response body"), "reqwest error")
+                log::error!("failed to read response body");
+                return Error::e_explain(Custom("failed to read response body"), "reqwest error");
             }
         };
 
@@ -153,9 +162,11 @@ impl HealthCheck for ChainHealthCheck {
     }
 }
 
+#[cfg(test)]
 static INIT: OnceCell<()> = OnceCell::new();
 
 // todo: move this to a common place
+#[cfg(test)]
 pub fn initialize_logger() {
     INIT.get_or_init(|| {
         if let Err(e) = env_logger::builder().is_test(true).try_init() {

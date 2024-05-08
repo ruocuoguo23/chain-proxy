@@ -6,17 +6,22 @@ use pingora::prelude::*;
 use std::sync::Arc;
 
 pub struct ProxyApp {
-    balancer: Arc<LoadBalancer<RoundRobin>>,
+    // currently we only support two clusters, maybe with different priority
+    cluster_one: Arc<LoadBalancer<RoundRobin>>,
+    cluster_two: Arc<LoadBalancer<RoundRobin>>,
+
     host_configs: Vec<ChainProxyConfig>,
 }
 
 impl ProxyApp {
     pub fn new(
         host_configs: Vec<ChainProxyConfig>,
-        balancer: Arc<LoadBalancer<RoundRobin>>,
+        cluster_one: Arc<LoadBalancer<RoundRobin>>,
+        cluster_two: Arc<LoadBalancer<RoundRobin>>,
     ) -> Self {
         ProxyApp {
-            balancer,
+            cluster_one: cluster_one.clone(),
+            cluster_two: cluster_two.clone(),
             host_configs,
         }
     }
@@ -36,7 +41,7 @@ impl ProxyHttp for ProxyApp {
         info!("host header: {host_header}");
 
         // First select healthy upstream from the balancer, and then select the best one
-        let backends = self.balancer.backends();
+        let backends = self.cluster_one.backends();
         let peers = backends.get_backend();
         let healthy_peers = peers
             .iter()

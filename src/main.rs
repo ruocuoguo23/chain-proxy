@@ -63,18 +63,22 @@ fn create_services_from_config(server_conf: &Arc<ServerConf>) -> Vec<Box<dyn Ser
                 proxy_addr: format!("{}", proxy_addr),
                 proxy_tls: node.tls(),
                 proxy_hostname: node.hostname().unwrap_or_default().to_string(),
+                proxy_uri: node_url.to_string(),
                 priority: node.priority(),
                 path: chain.health_check().path().to_string(),
                 method: chain.health_check().method().to_string(),
             };
+            log::info!("Host config: {:#?}", host_config);
+
             host_configs.push(host_config);
         }
 
-        let (chain_proxy_service, background) = service::proxy::proxy_service_plain(
-            server_conf,
-            &format!("0.0.0.0:{http_port}"),
-            host_configs,
-        );
+        let (chain_proxy_service, background1, background2) =
+            service::proxy::new_chain_proxy_service(
+                server_conf,
+                &format!("0.0.0.0:{http_port}"),
+                host_configs,
+            );
 
         let chain_name = chain.name();
         let interval = chain.interval();
@@ -86,7 +90,8 @@ fn create_services_from_config(server_conf: &Arc<ServerConf>) -> Vec<Box<dyn Ser
         );
 
         services.push(Box::new(chain_proxy_service));
-        services.push(Box::new(background));
+        services.push(Box::new(background1));
+        services.push(Box::new(background2));
     }
 
     services
