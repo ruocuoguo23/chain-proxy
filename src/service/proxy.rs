@@ -7,6 +7,7 @@ use pingora::lb::{
 };
 use pingora::{
     prelude::*, server::configuration::ServerConf, services::background::GenBackgroundService,
+    services::Service,
 };
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -17,9 +18,16 @@ pub struct ChainProxyConfig {
     pub proxy_tls: bool,
     pub proxy_hostname: String,
     pub proxy_uri: String,
+    // current proxy priority, the higher the better
     pub priority: i32,
+    // health check api path
     pub path: String,
+    // health check method, for example, "POST", "GET"
     pub method: String,
+    // health check interval, in seconds
+    pub interval: u64,
+    // block gap, if the cluster block number is block_gap behind the max block number, it's considered unhealthy
+    pub block_gap: u64,
 }
 
 fn build_chain_cluster_service<S: BackendSelection>(
@@ -60,7 +68,7 @@ where
     );
 
     cluster.set_health_check(chain_health_check);
-    cluster.health_check_frequency = Some(std::time::Duration::from_secs(5));
+    cluster.health_check_frequency = Some(std::time::Duration::from_secs(chain_config.interval));
 
     background_service("cluster health check", cluster)
 }
@@ -69,26 +77,22 @@ pub fn new_chain_proxy_service(
     server_conf: &Arc<ServerConf>,
     listen_addr: &str,
     host_configs: Vec<ChainProxyConfig>,
-) -> (
-    impl pingora::services::Service,
-    impl pingora::services::Service,
-    impl pingora::services::Service,
-) {
+) -> (impl Service, Vec<Box<dyn Service>>) {
     // first create shared chain state for proxy upstream selection
     let chain_state = Arc::new(Mutex::new(ChainState::new()));
 
-    let cluster_one =
-        build_chain_cluster_service::<RoundRobin>(&host_configs[0], chain_state.clone());
-    let cluster_two =
-        build_chain_cluster_service::<RoundRobin>(&host_configs[1], chain_state.clone());
-
+    // build a vector of background services from host configs
+    let mut cluster_services = Vec::new();
     let mut clusters = HashMap::new();
-    clusters.insert(host_configs[0].proxy_uri.clone(), cluster_one.task());
-    clusters.insert(host_configs[1].proxy_uri.clone(), cluster_two.task());
+    for host_config in host_configs.iter() {
+        let cluster = build_chain_cluster_service::<RoundRobin>(host_config, chain_state.clone());
+        clusters.insert(host_config.proxy_uri.clone(), cluster.task());
+        cluster_services.push(Box::new(cluster) as Box<dyn Service>);
+    }
 
     let proxy_app = proxy::ProxyApp::new(host_configs.clone(), clusters, chain_state);
     let mut service = http_proxy_service(server_conf, proxy_app);
     service.add_tcp(listen_addr);
 
-    (service, cluster_one, cluster_two)
+    (service, cluster_services)
 }

@@ -1,10 +1,10 @@
 Chains:
   - Name: optimism
     Listen: 1017
-    Interval: 20
-    BlockGap: 20
+    Interval: 5
+    BlockGap: 50
     Nodes:
-      - Address: https://practical-green-butterfly.optimism.quiknode.pro/d02f8d49bde8ccbbcec3c9a8962646db998ade83
+      - Address: https://rpc.ankr.com/optimism
         Priority: 1
       - Address: https://mainnet.optimism.io/
         Priority: 0

@@ -47,10 +47,15 @@ impl ProxyHttp for ProxyApp {
 
         // determine the max block number
         let max_block_number = block_numbers.iter().map(|(_, v)| v).max().unwrap();
-        info!("Max block number: {}", max_block_number);
 
-        // if block number is not within the range, currently we set the range to 50, we should filter out the unhealthy ones
-        let block_range = 50;
+        // if block number is not within the range, we should filter out the unhealthy ones
+        let block_range = self.host_configs[0].block_gap;
+
+        info!(
+            "Max block number: {}, current block range: {}",
+            max_block_number, block_range
+        );
+
         let eligible_clusters: Vec<_> = self
             .host_configs
             .iter()

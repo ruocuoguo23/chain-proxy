@@ -59,6 +59,8 @@ fn create_services_from_config(server_conf: &Arc<ServerConf>) -> Vec<Box<dyn Ser
             };
 
             let proxy_addr = format!("{}:{}", url.host_str().unwrap(), port);
+            let interval = chain.interval();
+            let block_gap = chain.block_gap();
             let host_config = service::proxy::ChainProxyConfig {
                 proxy_addr: format!("{}", proxy_addr),
                 proxy_tls: node.tls(),
@@ -67,31 +69,35 @@ fn create_services_from_config(server_conf: &Arc<ServerConf>) -> Vec<Box<dyn Ser
                 priority: node.priority(),
                 path: chain.health_check().path().to_string(),
                 method: chain.health_check().method().to_string(),
+                interval,
+                block_gap,
             };
             log::info!("Host config: {:#?}", host_config);
 
             host_configs.push(host_config);
         }
 
-        let (chain_proxy_service, background1, background2) =
-            service::proxy::new_chain_proxy_service(
-                server_conf,
-                &format!("0.0.0.0:{http_port}"),
-                host_configs,
-            );
+        let (chain_proxy_service, cluster_services) = service::proxy::new_chain_proxy_service(
+            server_conf,
+            &format!("0.0.0.0:{http_port}"),
+            host_configs,
+        );
 
         let chain_name = chain.name();
-        let interval = chain.interval();
-        let block_gap = chain.block_gap();
         // print chain proxy info
         log::info!(
-            "Chain {chain_name} proxy service created, listening on {http_port}, \
-            interval: {interval}, block_gap: {block_gap}"
+            "Chain {} proxy service created, listening on {}, \
+            interval: {}, block_gap: {}",
+            chain_name,
+            http_port,
+            chain.interval(),
+            chain.block_gap()
         );
 
         services.push(Box::new(chain_proxy_service));
-        services.push(Box::new(background1));
-        services.push(Box::new(background2));
+        for cluster_service in cluster_services {
+            services.push(cluster_service);
+        }
     }
 
     services

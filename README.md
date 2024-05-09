@@ -54,24 +54,18 @@ health check intervals, and other relevant settings.
 ```yaml
 # Example config.toml:
 Chains:
-  - Name: solana
+  - Name: optimism
     Listen: 1017
-    Interval: 20
-    BlockGap: 20
+    Interval: 5
+    BlockGap: 50
     Nodes:
-      - Address: https://tiniest-wandering-flower.solana-mainnet.quiknode.pro/3f2cf77b66958c08189f7d289df7d0740e554be2
+      - Address: https://rpc.ankr.com/optimism
         Priority: 1
-      - Address: https://api.mainnet-beta.solana.com
+      - Address: https://mainnet.optimism.io/
         Priority: 0
-  - Name: ethereum
-    Listen: 1090
-    Interval: 20
-    BlockGap: 20
-    Nodes:
-      - Address: https://tiniest-wandering-flower.solana-mainnet.quiknode.pro/3f2cf77b66958c08189f7d289df7d0740e554be2
-        Priority: 1
-      - Address: https://api.mainnet-beta.solana.com
-        Priority: 0
+    HealthCheck:
+      Path: ""
+      Method: POST
 ```
 
 ## Usage
