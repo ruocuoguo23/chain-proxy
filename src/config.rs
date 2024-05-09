@@ -131,10 +131,6 @@ impl ChainState {
             .insert(host_name.to_string(), block_number);
     }
 
-    pub fn get_block_number(&self, host_name: &str) -> Option<&u64> {
-        self.block_numbers.get(host_name)
-    }
-
     pub fn get_block_numbers(&self) -> &HashMap<String, u64> {
         &self.block_numbers
     }

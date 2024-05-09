@@ -1,6 +1,5 @@
 use crate::config::ChainState;
 use async_trait::async_trait;
-use once_cell::sync::OnceCell;
 use pingora::lb::health_check::HealthCheck;
 use pingora::lb::Backend;
 use pingora::{Custom, Error, Result};
@@ -169,7 +168,8 @@ impl HealthCheck for ChainHealthCheck {
             // update the chain state
             let chain_state_result = chain_state_result.unwrap();
             log::info!(
-                "updating chain state with new block number {}",
+                "updating chain state with chain host {}, new block number {}",
+                self.host,
                 chain_state_result
             );
 

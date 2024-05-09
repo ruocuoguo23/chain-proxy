@@ -8,6 +8,7 @@ use pingora::lb::{
 use pingora::{
     prelude::*, server::configuration::ServerConf, services::background::GenBackgroundService,
 };
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Debug)]
@@ -81,12 +82,11 @@ pub fn new_chain_proxy_service(
     let cluster_two =
         build_chain_cluster_service::<RoundRobin>(&host_configs[1], chain_state.clone());
 
-    let proxy_app = proxy::ProxyApp::new(
-        host_configs.clone(),
-        cluster_one.task(),
-        cluster_two.task(),
-        chain_state,
-    );
+    let mut clusters = HashMap::new();
+    clusters.insert(host_configs[0].proxy_uri.clone(), cluster_one.task());
+    clusters.insert(host_configs[1].proxy_uri.clone(), cluster_two.task());
+
+    let proxy_app = proxy::ProxyApp::new(host_configs.clone(), clusters, chain_state);
     let mut service = http_proxy_service(server_conf, proxy_app);
     service.add_tcp(listen_addr);
 

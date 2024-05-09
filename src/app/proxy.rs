@@ -4,27 +4,29 @@ use async_trait::async_trait;
 use http::HeaderName;
 use log::info;
 use pingora::prelude::*;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 pub struct ProxyApp {
     // currently we only support two clusters, maybe with different priority
-    cluster_one: Arc<LoadBalancer<RoundRobin>>,
-    cluster_two: Arc<LoadBalancer<RoundRobin>>,
+    // key is the host name, value is the cluster
+    clusters: HashMap<String, Arc<LoadBalancer<RoundRobin>>>,
 
+    // host configs
     host_configs: Vec<ChainProxyConfig>,
+
+    // shared chain state
     chain_state: Arc<Mutex<ChainState>>,
 }
 
 impl ProxyApp {
     pub fn new(
         host_configs: Vec<ChainProxyConfig>,
-        cluster_one: Arc<LoadBalancer<RoundRobin>>,
-        cluster_two: Arc<LoadBalancer<RoundRobin>>,
+        clusters: HashMap<String, Arc<LoadBalancer<RoundRobin>>>,
         chain_state: Arc<Mutex<ChainState>>,
     ) -> Self {
         ProxyApp {
-            cluster_one: cluster_one.clone(),
-            cluster_two: cluster_two.clone(),
+            clusters,
             host_configs,
             chain_state: Arc::clone(&chain_state),
         }
@@ -37,15 +39,59 @@ impl ProxyHttp for ProxyApp {
     fn new_ctx(&self) {}
 
     async fn upstream_peer(&self, session: &mut Session, _ctx: &mut ()) -> Result<Box<HttpPeer>> {
-        // first check chain state of the cluster
-        {
-            let mut state = self.chain_state.lock().unwrap();
-            let block_numbers = state.get_block_numbers();
+        // first get the chain state of the cluster
+        let block_numbers = {
+            let state = self.chain_state.lock().unwrap();
+            state.get_block_numbers().clone()
+        };
 
-            // Now you can iterate over the `block_numbers` HashMap reference
-            for (host_name, block_number) in block_numbers {
-                info!("Host: {}, Block Number: {}", host_name, block_number);
+        // determine the max block number
+        let max_block_number = block_numbers.iter().map(|(_, v)| v).max().unwrap();
+        info!("Max block number: {}", max_block_number);
+
+        // if block number is not within the range, currently we set the range to 50, we should filter out the unhealthy ones
+        let block_range = 50;
+        let eligible_clusters: Vec<_> = self
+            .host_configs
+            .iter()
+            .filter(|config| {
+                let current_block_number = block_numbers.get(config.proxy_uri.as_str()).unwrap();
+                if max_block_number - current_block_number > block_range {
+                    info!(
+                        "Host: {} is not eligible, block number: {}",
+                        config.proxy_uri.as_str(),
+                        current_block_number
+                    );
+                    return false;
+                }
+                true
+            })
+            .collect();
+
+        // probably no case will reach here
+        if eligible_clusters.is_empty() {
+            log::error!("No eligible cluster found");
+            return Error::e_explain(Custom("No eligible cluster found"), "proxy error");
+        }
+
+        // select the best cluster based on priority
+        // we may combine with other information like healthy or latency
+        let selected_cluster_result = eligible_clusters
+            .into_iter()
+            .min_by_key(|config| config.priority);
+        let selected_cluster = match selected_cluster_result {
+            None => {
+                log::error!("No cluster selected");
+                return Error::e_explain(Custom("No cluster selected"), "proxy error");
             }
+            Some(cluster) => cluster,
+        };
+
+        // check the cluster
+        let cluster = self.clusters.get(selected_cluster.proxy_uri.as_str());
+        if let None = cluster {
+            log::error!("Cluster not found");
+            return Error::e_explain(Custom("Cluster not found"), "proxy error");
         }
 
         let host_header = session
@@ -55,57 +101,10 @@ impl ProxyHttp for ProxyApp {
             .unwrap();
         info!("host header: {host_header}");
 
-        // First select healthy upstream from the balancer, and then select the best one
-        let backends = self.cluster_one.backends();
-        let peers = backends.get_backend();
-        let healthy_peers = peers
-            .iter()
-            .filter(|p| backends.ready(p))
-            .collect::<Vec<_>>();
-
-        if healthy_peers.is_empty() {
-            log::error!("No healthy upstream found");
-            panic!("No healthy upstream found");
-        }
-
-        // Find the host config that matches the current state best
-        let mut best_host_config = None;
-        for host_config in &self.host_configs {
-            let mut is_healthy = false;
-            // first check health
-            for peer in &healthy_peers {
-                let peer_addr = peer.addr.as_inet();
-                let peer_addr = peer_addr.unwrap().to_string();
-                if peer_addr == host_config.proxy_addr {
-                    is_healthy = true;
-                    break;
-                }
-            }
-            if !is_healthy {
-                continue;
-            }
-
-            // then check priority
-            if best_host_config.is_none() {
-                best_host_config = Some(host_config);
-                continue;
-            }
-
-            if host_config.priority > best_host_config.as_ref().unwrap().priority {
-                best_host_config = Some(host_config);
-            }
-        }
-
-        if best_host_config.is_none() {
-            log::error!("No host config found");
-            panic!("No host config found");
-        }
-
-        let best_host_config = best_host_config.unwrap();
         let proxy_to = HttpPeer::new(
-            best_host_config.proxy_addr.as_str(),
-            best_host_config.proxy_tls,
-            best_host_config.proxy_hostname.clone(),
+            selected_cluster.proxy_addr.as_str(),
+            selected_cluster.proxy_tls,
+            selected_cluster.proxy_hostname.clone(),
         );
         let peer = Box::new(proxy_to);
 
