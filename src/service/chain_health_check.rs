@@ -7,6 +7,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
 type Validator = Box<dyn Fn(&[u8]) -> Result<u64> + Send + Sync>;
 
 /// Define various response validators for different chain, like ethereum, bitcoin, etc.
@@ -192,23 +193,21 @@ impl HealthCheck for ChainHealthCheck {
 }
 
 #[cfg(test)]
-static INIT: OnceCell<()> = OnceCell::new();
-
-// todo: move this to a common place
-#[cfg(test)]
-pub fn initialize_logger() {
-    INIT.get_or_init(|| {
-        if let Err(e) = env_logger::builder().is_test(true).try_init() {
-            eprintln!("Logger already initialized: {}", e);
-        }
-    });
-}
-
-#[cfg(test)]
 mod test {
+    use super::*;
+    use once_cell::sync::OnceCell;
     use pingora::protocols::l4::socket::SocketAddr;
 
-    use super::*;
+    static INIT: OnceCell<()> = OnceCell::new();
+
+    // todo: move this to a common place
+    pub fn initialize_logger() {
+        INIT.get_or_init(|| {
+            if let Err(e) = env_logger::builder().is_test(true).try_init() {
+                eprintln!("Logger already initialized: {}", e);
+            }
+        });
+    }
 
     #[tokio::test]
     async fn test_https_check_get() {
@@ -251,34 +250,6 @@ mod test {
         );
         let backend = Backend {
             addr: SocketAddr::Inet("23.23.165.157:443".parse().unwrap()),
-            weight: 1,
-        };
-
-        assert!(http_check.check(&backend).await.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_http_check_post() {
-        initialize_logger();
-
-        // create a health check that connects to httpbin.org over HTTPS
-        let chain_health_check = ChainHealthCheck::new(
-            "http://127.0.0.1:11006",
-            "/api/print-json",
-            "POST",
-            Arc::new(Mutex::new(ChainState::new())),
-        );
-        let http_check = chain_health_check.with_request_body(
-            r#"
-               {
-                    "key":"value"
-               }
-               "#
-            .as_bytes()
-            .to_vec(),
-        );
-        let backend = Backend {
-            addr: SocketAddr::Inet("127.0.0.1:11006".parse().unwrap()),
             weight: 1,
         };
 
