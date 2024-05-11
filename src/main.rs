@@ -1,3 +1,4 @@
+use log4rs;
 use pingora::server::configuration::ServerConf;
 use pingora::{
     server::{configuration::Opt, Server},
@@ -105,7 +106,8 @@ fn create_services_from_config(server_conf: &Arc<ServerConf>) -> Vec<Box<dyn Ser
 
 pub fn main() {
     // init log
-    env_logger::init();
+    let log_config_path = env::var("LOG_CONFIG_PATH").unwrap_or("log4rs.yaml".to_owned());
+    log4rs::init_file(log_config_path, Default::default()).unwrap();
 
     // load config
     let config_path = env::var("CONFIG_PATH").unwrap_or("config.yaml".to_owned());
