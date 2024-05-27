@@ -1,12 +1,13 @@
 use crate::app::proxy;
 use crate::config::ChainState;
 use crate::service::chain_health_check::ChainHealthCheck;
-use pingora::lb::{
-    selection::{BackendIter, BackendSelection},
-    LoadBalancer,
+use pingora_load_balancing::{
+    selection::{BackendIter, BackendSelection, RoundRobin},
+    LoadBalancer
 };
+use pingora_proxy::http_proxy_service;
 use pingora::{
-    prelude::*, server::configuration::ServerConf, services::background::GenBackgroundService,
+    server::configuration::ServerConf, services::background::{GenBackgroundService, background_service},
     services::Service,
 };
 use std::collections::HashMap;

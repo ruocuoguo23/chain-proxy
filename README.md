@@ -28,27 +28,28 @@ the [official Rust website](https://www.rust-lang.org/tools/install).
 
 1. Clone the repository:
 
-```sh
-git clone https://github.com/your-username/chain-proxy.git
-cd chain-proxy
-```
+    ```sh
+    git clone https://github.com/your-username/chain-proxy.git
+    cd chain-proxy
+    ```
 
 2. Build the project:
 
-```sh
-cargo build --release
-```
+    ```sh
+    cargo build --release
+    ```
 
 3. Run the proxy:
    set the 'CONFIG_PATH' environment variable to the path of the config.yaml file
+4. set the 'LOG_CONFIG_PATH' environment variable to the path of the log4rs.yaml file
 
-```sh
-CONFIG_PATH=path/to/config.yaml cargo run --release
-```
+    ```sh
+    CONFIG_PATH=path/to/config.yaml LOG_CONFIG_PATH=path/to/log4rs.yaml cargo run --release
+    ```
 
 ### Configuration
 
-Chain Proxy can be configured by editing the config.toml file. Here you can specify the nodes, their respective
+Chain Proxy can be configured by editing the config.yaml file. Here you can specify the nodes, their respective
 health check intervals, and other relevant settings.
 
 ```yaml
@@ -66,6 +67,33 @@ Chains:
     HealthCheck:
       Path: ""
       Method: POST
+```
+
+here is an example of the log4rs.yaml file
+
+```yaml
+refresh_rate: 30 seconds
+appenders:
+  stdout:
+    kind: console
+  file:
+    kind: rolling_file
+    path: "log/chain_proxy.log"
+    policy:
+      kind: compound
+      trigger:
+        kind: size
+        limit: 10mb # when the file size exceeds 10mb, a rollover will be triggered
+      roller:
+        kind: fixed_window
+        pattern: "log/chain_proxy.{}.log"
+        base: 1
+        count: 5
+root:
+  level: info
+  appenders:
+    - stdout
+    - file
 ```
 
 ## Usage

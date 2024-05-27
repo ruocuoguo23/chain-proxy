@@ -10,7 +10,13 @@ tempfile = "3.2.0"
 
 [dependencies]
 async-trait = "0.1"
-pingora = { version = "0.1.1", features = ["lb", "proxy"] }
+#pingora = { version = "0.2.0", features = ["lb", "proxy"] }
+pingora = "0.2.0"
+pingora-openssl = "0.2.0"
+pingora-http = "0.2.0"
+pingora-load-balancing = { version = "0.2.0" }
+pingora-pool = "0.2.0"
+pingora-proxy = { version = "0.2.0" }
 log = "0.4.21"
 structopt = "0.3.26"
 env_logger = "0.11.3"

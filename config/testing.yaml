@@ -6,7 +6,7 @@ Chains:
     Nodes:
       - Address: https://rpc.ankr.com/optimism
         Priority: 1
-      - Address: https://mainnet.optimism.io/
+      - Address: https://mainnet.optimism.io
         Priority: 0
     HealthCheck:
       Path: ""

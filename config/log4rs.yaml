@@ -9,7 +9,7 @@ appenders:
       kind: compound
       trigger:
         kind: size
-        limit: 10mb  # 文件达到10MB时轮转
+        limit: 10mb # when the file size exceeds 10mb, a rollover will be triggered
       roller:
         kind: fixed_window
         pattern: "log/chain_proxy.{}.log"

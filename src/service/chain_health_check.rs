@@ -1,7 +1,7 @@
 use crate::config::ChainState;
 use async_trait::async_trait;
-use pingora::lb::health_check::HealthCheck;
-use pingora::lb::Backend;
+use pingora_load_balancing::health_check::HealthCheck;
+use pingora_load_balancing::Backend;
 use pingora::{Custom, Error, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -32,7 +32,7 @@ pub(crate) fn eth_validator(body: &[u8]) -> Result<u64> {
         Error::e_explain(Custom("invalid jsonrpc"), "during http healthcheck")
     } else {
         // log the result
-        log::info!("eth block number: {}", parsed.result);
+        // log::info!("eth block number: {}", parsed.result);
         // from hex string to u64
         let block_number = u64::from_str_radix(&parsed.result[2..], 16);
         if block_number.is_err() {
@@ -111,7 +111,7 @@ impl ChainHealthCheck {
 #[async_trait]
 impl HealthCheck for ChainHealthCheck {
     async fn check(&self, _target: &Backend) -> Result<()> {
-        log::info!("checking health of {}", self.host);
+        // log::info!("checking health of {}", self.host);
         let client = self.client.clone();
 
         let method_result = reqwest::Method::from_bytes(self.request_method.as_bytes());
@@ -168,11 +168,11 @@ impl HealthCheck for ChainHealthCheck {
 
             // update the chain state
             let chain_state_result = chain_state_result.unwrap();
-            log::info!(
-                "updating chain state with chain host {}, new block number {}",
-                self.host,
-                chain_state_result
-            );
+            // log::info!(
+            //     "updating chain state with chain host {}, new block number {}",
+            //     self.host,
+            //     chain_state_result
+            // );
 
             {
                 let mut state = self.chain_state.lock().unwrap();
