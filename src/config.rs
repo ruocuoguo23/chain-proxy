@@ -6,6 +6,31 @@ use std::io::Read;
 use std::path::Path;
 use url::{ParseError, Url};
 
+pub const LOG_CONFIG: &str = r#"
+refresh_rate: 30 seconds
+appenders:
+  stdout:
+    kind: console
+  file:
+    kind: rolling_file
+    path: "log/chain_proxy.log"
+    policy:
+      kind: compound
+      trigger:
+        kind: size
+        limit: 10mb # when the file size exceeds 10mb, a rollover will be triggered
+      roller:
+        kind: fixed_window
+        pattern: "log/chain_proxy.{}.log"
+        base: 1
+        count: 5
+root:
+  level: info
+  appenders:
+    - stdout
+    - file
+"#;
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Node {
     #[serde(rename = "Address")]

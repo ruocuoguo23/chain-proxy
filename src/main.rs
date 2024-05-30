@@ -4,7 +4,6 @@ use pingora::{
     server::{configuration::Opt, Server},
     services::Service,
 };
-use std::env;
 use std::sync::Arc;
 use structopt::StructOpt;
 
@@ -21,7 +20,9 @@ static GLOBAL: jemallocator::Jemalloc = jemallocator::Jemalloc;
 extern crate lazy_static;
 
 use crate::config::Config;
+use crate::config::LOG_CONFIG;
 use std::sync::RwLock;
+use std::path::PathBuf;
 use url::Url;
 
 lazy_static! {
@@ -31,6 +32,14 @@ lazy_static! {
 mod app;
 mod config;
 mod service;
+
+#[derive(StructOpt, Debug)]
+#[structopt(name = "chain-proxy")]
+struct ChainOpt {
+    /// Path to the configuration file
+    #[structopt(short, long, parse(from_os_str))]
+    config: Option<PathBuf>,
+}
 
 fn create_services_from_config(server_conf: &Arc<ServerConf>) -> Vec<Box<dyn Service>> {
     let mut services: Vec<Box<dyn Service>> = Vec::new();
@@ -106,12 +115,15 @@ fn create_services_from_config(server_conf: &Arc<ServerConf>) -> Vec<Box<dyn Ser
 
 pub fn main() {
     // init log
-    let log_config_path = env::var("LOG_CONFIG_PATH").unwrap_or("log4rs.yaml".to_owned());
-    log4rs::init_file(log_config_path, Default::default()).unwrap();
+    let config  = serde_yaml::from_str::<log4rs::config::RawConfig>(&LOG_CONFIG.to_string()).unwrap();
+
+    // Initialize log4rs with the parsed configuration
+    log4rs::init_raw_config(config).unwrap();
 
     // load config
-    let config_path = env::var("CONFIG_PATH").unwrap_or("config.yaml".to_owned());
-    match Config::load_config(config_path) {
+    let chain_opt = ChainOpt::from_args();
+    let config_path = chain_opt.config.unwrap_or_else(|| "config.yaml".into());
+    match Config::load_config(&config_path) {
         Ok(_) => {
             log::info!("Config loaded successfully");
         }
@@ -121,7 +133,12 @@ pub fn main() {
         }
     }
 
-    let opt = Some(Opt::from_args());
+    let opts: Vec<String> = vec![
+        "chain-proxy".into(),
+        "-c".into(),
+        config_path.to_str().unwrap().into(),
+    ];
+    let opt = Some(Opt::from_iter(opts));
     let mut my_server = Server::new(opt).unwrap();
     my_server.bootstrap();
 

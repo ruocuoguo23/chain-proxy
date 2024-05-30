@@ -36,15 +36,12 @@ the [official Rust website](https://www.rust-lang.org/tools/install).
 2. Build the project:
 
     ```sh
-    cargo build --release
+    ./build.sh
     ```
 
 3. Run the proxy:
-   set the 'CONFIG_PATH' environment variable to the path of the config.yaml file
-4. set the 'LOG_CONFIG_PATH' environment variable to the path of the log4rs.yaml file
-
     ```sh
-    CONFIG_PATH=path/to/config.yaml LOG_CONFIG_PATH=path/to/log4rs.yaml cargo run --release
+    ./chain-proxy --config path/to/config.yaml
     ```
 
 ### Configuration
@@ -67,33 +64,6 @@ Chains:
     HealthCheck:
       Path: ""
       Method: POST
-```
-
-here is an example of the log4rs.yaml file
-
-```yaml
-refresh_rate: 30 seconds
-appenders:
-  stdout:
-    kind: console
-  file:
-    kind: rolling_file
-    path: "log/chain_proxy.log"
-    policy:
-      kind: compound
-      trigger:
-        kind: size
-        limit: 10mb # when the file size exceeds 10mb, a rollover will be triggered
-      roller:
-        kind: fixed_window
-        pattern: "log/chain_proxy.{}.log"
-        base: 1
-        count: 5
-root:
-  level: info
-  appenders:
-    - stdout
-    - file
 ```
 
 ## Usage
