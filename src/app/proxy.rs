@@ -23,19 +23,19 @@ pub const DEFAULT_PEER_OPTIONS: PeerOptions = PeerOptions {
     verify_hostname: true,
     read_timeout: Some(Duration::from_secs(30)),
     connection_timeout: Some(Duration::from_secs(30)),
-    tcp_recv_buf: Some(2048),
+    tcp_recv_buf: Some(512 * 1024),
     tcp_keepalive: Some(TcpKeepalive {
         count: 5,
         interval: Duration::from_secs(10),
         idle: Duration::from_secs(30),
     }),
     bind_to: None,
-    total_connection_timeout: None,
+    total_connection_timeout: Some(Duration::from_secs(5)),
     idle_timeout: None,
-    write_timeout: None,
+    write_timeout: Some(Duration::from_secs(5)),
     verify_cert: false,
     alternative_cn: None,
-    alpn: ALPN::H2H1,
+    alpn: ALPN::H1,
     ca: None,
     no_header_eos: false,
     h2_ping_interval: None,
@@ -99,7 +99,16 @@ impl ProxyHttp for ProxyApp {
             .host_configs
             .iter()
             .filter(|config| {
-                let current_block_number = block_numbers.get(config.proxy_uri.as_str()).unwrap();
+                let current_block_number = block_numbers.get(config.proxy_uri.as_str());
+                if let None = current_block_number {
+                    info!(
+                        "Host: {} is not eligible, block number not found",
+                        config.proxy_uri.as_str()
+                    );
+                    return false;
+                }
+                let current_block_number = current_block_number.unwrap();
+
                 if max_block_number - current_block_number > block_range {
                     info!(
                         "Host: {} is not eligible, block number: {}",

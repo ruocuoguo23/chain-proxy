@@ -31,8 +31,6 @@ pub(crate) fn eth_validator(body: &[u8]) -> Result<u64> {
     if parsed.jsonrpc != "2.0" {
         Error::e_explain(Custom("invalid jsonrpc"), "during http healthcheck")
     } else {
-        // log the result
-        // log::info!("eth block number: {}", parsed.result);
         // from hex string to u64
         let block_number = u64::from_str_radix(&parsed.result[2..], 16);
         if block_number.is_err() {
@@ -111,7 +109,6 @@ impl ChainHealthCheck {
 #[async_trait]
 impl HealthCheck for ChainHealthCheck {
     async fn check(&self, _target: &Backend) -> Result<()> {
-        // log::info!("checking health of {}", self.host);
         let client = self.client.clone();
 
         let method_result = reqwest::Method::from_bytes(self.request_method.as_bytes());
@@ -160,6 +157,7 @@ impl HealthCheck for ChainHealthCheck {
             let chain_state_result = validator(&response_body);
             if chain_state_result.is_err() {
                 log::error!("failed to validate response body");
+
                 return Error::e_explain(
                     Custom("failed to validate response body"),
                     "validator error",
@@ -168,11 +166,6 @@ impl HealthCheck for ChainHealthCheck {
 
             // update the chain state
             let chain_state_result = chain_state_result.unwrap();
-            // log::info!(
-            //     "updating chain state with chain host {}, new block number {}",
-            //     self.host,
-            //     chain_state_result
-            // );
 
             {
                 let mut state = self.chain_state.lock().unwrap();

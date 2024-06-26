@@ -142,6 +142,9 @@ pub fn main() {
     let mut my_server = Server::new(opt).unwrap();
     my_server.bootstrap();
 
+    // print the server configuration
+    log::info!("Server configuration: {:#?}", my_server.configuration);
+
     // create services from config and add to server
     let services: Vec<Box<dyn Service>> = create_services_from_config(&my_server.configuration);
 

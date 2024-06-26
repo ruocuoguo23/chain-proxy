@@ -1,12 +1,15 @@
+version: 1
+threads: 8
+grace_period_seconds: 10
 Chains:
   - Name: optimism
-    Listen: 1017
-    Interval: 5
+    Listen: 8017
+    Interval: 15
     BlockGap: 50
     Nodes:
-      - Address: https://rpc.ankr.com/optimism
+      - Address: http://127.0.0.1:11160
         Priority: 1
-      - Address: https://mainnet.optimism.io
+      - Address: https://optimism-sepolia.infura.io/v3/559af310b68646d8accf0cf36111f2eb
         Priority: 0
     HealthCheck:
       Path: ""
