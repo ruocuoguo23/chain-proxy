@@ -142,6 +142,7 @@ pub fn main() {
         "chain-proxy".into(),
         "-c".into(),
         config_path.to_str().unwrap().into(),
+        "-d".into(),
     ];
 
     // if upgrade flag is set, add it to the opts
