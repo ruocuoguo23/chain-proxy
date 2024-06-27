@@ -1,6 +1,7 @@
 version: 1
 threads: 8
 grace_period_seconds: 10
+upgrade_sock: /tmp/pingora.sock
 Chains:
   - Name: optimism
     Listen: 8017

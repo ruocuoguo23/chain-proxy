@@ -21,8 +21,8 @@ extern crate lazy_static;
 
 use crate::config::Config;
 use crate::config::LOG_CONFIG;
-use std::sync::RwLock;
 use std::path::PathBuf;
+use std::sync::RwLock;
 use url::Url;
 
 lazy_static! {
@@ -115,7 +115,8 @@ fn create_services_from_config(server_conf: &Arc<ServerConf>) -> Vec<Box<dyn Ser
 
 pub fn main() {
     // init log
-    let config  = serde_yaml::from_str::<log4rs::config::RawConfig>(&LOG_CONFIG.to_string()).unwrap();
+    let config =
+        serde_yaml::from_str::<log4rs::config::RawConfig>(&LOG_CONFIG.to_string()).unwrap();
 
     // Initialize log4rs with the parsed configuration
     log4rs::init_raw_config(config).unwrap();
@@ -137,6 +138,7 @@ pub fn main() {
         "chain-proxy".into(),
         "-c".into(),
         config_path.to_str().unwrap().into(),
+        "-u".into(),
     ];
     let opt = Some(Opt::from_iter(opts));
     let mut my_server = Server::new(opt).unwrap();
