@@ -39,6 +39,10 @@ struct ChainOpt {
     /// Path to the configuration file
     #[structopt(short, long, parse(from_os_str))]
     config: Option<PathBuf>,
+
+    /// Perform an upgrade
+    #[structopt(long)]
+    upgrade: bool,
 }
 
 fn create_services_from_config(server_conf: &Arc<ServerConf>) -> Vec<Box<dyn Service>> {
@@ -134,12 +138,17 @@ pub fn main() {
         }
     }
 
-    let opts: Vec<String> = vec![
+    let mut opts: Vec<String> = vec![
         "chain-proxy".into(),
         "-c".into(),
         config_path.to_str().unwrap().into(),
-        "-u".into(),
     ];
+
+    // if upgrade flag is set, add it to the opts
+    if chain_opt.upgrade {
+        opts.push("-u".into());
+    }
+
     let opt = Some(Opt::from_iter(opts));
     let mut my_server = Server::new(opt).unwrap();
     my_server.bootstrap();

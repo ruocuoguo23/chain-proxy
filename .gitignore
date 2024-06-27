@@ -1,6 +1,7 @@
 /target
 .idea
 log
+logs
 
 .DS_Store
 /bin
