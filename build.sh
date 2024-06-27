@@ -25,7 +25,7 @@ if [ $? -eq 0 ]; then
     # Check if the binary file exists
     if [ -f "$RELEASE_BINARY" ]; then
         echo "Copying binary to $TARGET_DIR..."
-        cp "$RELEASE_BINARY" $TARGET_DIR/
+        mv "$RELEASE_BINARY" $TARGET_DIR/
         echo "Binary copied to $TARGET_DIR."
     else
         echo "Error: Binary file not found."
