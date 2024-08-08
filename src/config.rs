@@ -25,7 +25,7 @@ appenders:
         base: 1
         count: 5
 root:
-  level: debug
+  level: info
   appenders:
     - stdout
     - file
@@ -82,6 +82,8 @@ impl HealthCheck {
 pub struct Chain {
     #[serde(rename = "Name")]
     name: String,
+    #[serde(rename = "ChainType")]
+    chain_type: String,
     #[serde(rename = "Listen")]
     listen: u16,
     #[serde(rename = "Interval")]
@@ -97,6 +99,10 @@ pub struct Chain {
 impl Chain {
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    pub fn chain_type(&self) -> &str {
+        &self.chain_type
     }
 
     pub fn listen(&self) -> u16 {
@@ -121,9 +127,30 @@ impl Chain {
 }
 
 #[derive(Debug, Serialize, Deserialize, Default)]
+pub struct Monitor {
+    #[serde(rename = "Listen")]
+    listen: u16,
+    #[serde(rename = "System")]
+    system: String,
+}
+
+impl Monitor {
+    pub fn listen(&self) -> u16 {
+        self.listen
+    }
+
+    pub fn system(&self) -> &str {
+        self.system.as_str()
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub struct Config {
     #[serde(rename = "Chains")]
     pub(crate) chains: Vec<Chain>,
+
+    #[serde(rename = "Monitor")]
+    pub(crate) monitor: Monitor,
 }
 
 impl Config {
@@ -140,13 +167,17 @@ impl Config {
 
 #[derive(Debug)]
 pub struct ChainState {
+    // store the chain name
+    pub(crate) chain_name: String,
+
     // store chain node hostname and current block number
     pub(crate) block_numbers: HashMap<String, u64>,
 }
 
 impl ChainState {
-    pub fn new() -> Self {
+    pub fn new(chain_name: &str) -> Self {
         ChainState {
+            chain_name: chain_name.to_string(),
             block_numbers: HashMap::new(),
         }
     }
@@ -183,6 +214,7 @@ Chains:
     Listen: 1017
     Interval: 20
     BlockGap: 20
+    ChainType: solana
     Nodes:
       - Address: https://example.com/solana
         Priority: 1
@@ -195,6 +227,7 @@ Chains:
     Listen: 1090
     Interval: 20
     BlockGap: 20
+    ChainType: ethereum
     Nodes:
       - Address: https://example.com/ethereum
         Priority: 1
@@ -203,6 +236,10 @@ Chains:
     HealthCheck:
       Path: /health2
       Method: GET
+
+Monitor:
+    Listen: 1018
+    System: "test"
 "#;
 
         // Create a temporary config file
@@ -227,5 +264,7 @@ Chains:
 
         assert_eq!(config.chains[0].health_check().path(), "/health1");
         assert_eq!(config.chains[0].health_check().method(), "GET");
+
+        assert_eq!(config.monitor.listen(), 1018);
     }
 }

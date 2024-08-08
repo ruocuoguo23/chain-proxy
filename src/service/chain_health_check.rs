@@ -4,13 +4,73 @@ use pingora_load_balancing::health_check::HealthCheck;
 use pingora_load_balancing::Backend;
 use pingora::{Custom, Error, Result};
 use reqwest::Client;
+use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use std::collections::HashMap;
+use crate::metrics::set_node_height_gauge;
 
-type Validator = Box<dyn Fn(&[u8]) -> Result<u64> + Send + Sync>;
+type Validator = Arc<dyn Fn(&[u8]) -> Result<u64> + Send + Sync>;
+
+#[derive(Clone)]
+pub struct ChainChecker {
+    pub validator: Validator,
+    pub request_body: Vec<u8>,
+}
+
+lazy_static! {
+    static ref CHAIN_CHECKERS: Mutex<HashMap<String, ChainChecker>> = Mutex::new(HashMap::new());
+}
+
+/// register a chain checker
+pub fn register_chain_checker(chain_type: &str, checker: ChainChecker) {
+    let mut checkers = CHAIN_CHECKERS.lock().unwrap();
+    checkers.insert(chain_type.to_string(), checker);
+}
+
+/// get a chain checker
+/// return None if the chain checker is not found
+pub fn get_chain_checker(chain_type: &str) -> Option<ChainChecker> {
+    let checkers = CHAIN_CHECKERS.lock().unwrap();
+    checkers.get(chain_type).cloned()
+}
+
+pub fn init_chain_checker() {
+    // register the eth chain checker
+    let ethereum_checker = ChainChecker {
+        validator: Arc::new(eth_validator),
+        request_body: r#"
+                {
+                    "jsonrpc":"2.0",
+                    "method":"eth_blockNumber",
+                    "id":1
+               }
+               "#
+            .as_bytes()
+            .to_vec(),
+    };
+    register_chain_checker("ethereum", ethereum_checker);
+
+    // register the ripple chain checker
+    let ripple_checker = ChainChecker {
+        validator: Arc::new(ripple_validator),
+        request_body: r#"
+                {
+                    "jsonrpc":"2.0",
+                    "method":"ledger_closed",
+                    "params":[{}],
+                    "id":1
+               }
+               "#
+            .as_bytes()
+            .to_vec(),
+    };
+    register_chain_checker("ripple", ripple_checker);
+}
 
 /// Define various response validators for different chain, like ethereum, bitcoin, etc.
+/// Eth response and validator
 #[derive(Debug, Serialize, Deserialize)]
 struct EthJsonResponse {
     /// The key to check in the JSON response
@@ -23,23 +83,66 @@ pub(crate) fn eth_validator(body: &[u8]) -> Result<u64> {
     // try to parse the JSON response
     let parsed = serde_json::from_slice(body);
     if parsed.is_err() {
+        // log the body
+        log::error!("failed to parse json: {}", String::from_utf8_lossy(body));
         return Error::e_explain(Custom("invalid json"), "during http healthcheck");
     }
 
     let parsed: EthJsonResponse = parsed.unwrap();
     // check if the JSON response is valid
     if parsed.jsonrpc != "2.0" {
+        // log the body
+        log::error!("failed to parse json: {}", String::from_utf8_lossy(body));
         Error::e_explain(Custom("invalid jsonrpc"), "during http healthcheck")
     } else {
         // from hex string to u64
         let block_number = u64::from_str_radix(&parsed.result[2..], 16);
         if block_number.is_err() {
+            // log the body
+            log::error!("failed to parse json: {}", String::from_utf8_lossy(body));
             return Error::e_explain(Custom("invalid block number"), "during http healthcheck");
         }
 
         Ok(block_number.unwrap())
     }
 }
+
+/// ripple response and validator
+#[derive(Debug, Serialize, Deserialize)]
+struct RippleJsonResponse {
+    /// The key to check in the JSON response
+    result: RippleResult,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct RippleResult {
+    /// The key to check in the JSON response
+    ledger_hash: String,
+    ledger_index: u64,
+    status: String,
+}
+
+pub(crate) fn ripple_validator(body: &[u8]) -> Result<u64> {
+    // try to parse the JSON response
+    let parsed: Result<RippleJsonResponse, serde_json::Error> = serde_json::from_slice(body);
+    if parsed.is_err() {
+        // log the body
+        log::error!("failed to parse json: {}", String::from_utf8_lossy(body));
+        return Error::e_explain(Custom("invalid json"), "during http healthcheck");
+    }
+
+    let parsed = parsed.unwrap();
+
+    // check if the JSON response is valid
+    if parsed.result.status != "success" {
+        // log the body
+        log::error!("failed to parse json: {}", String::from_utf8_lossy(body));
+        Error::e_explain(Custom("invalid status"), "during http healthcheck")
+    } else {
+        Ok(parsed.result.ledger_index)
+    }
+}
+
 /// Chain health check
 ///
 /// This health check checks if it can receive the expected HTTP(s) response from the given backend.
@@ -124,8 +227,12 @@ impl HealthCheck for ChainHealthCheck {
             }
         };
 
+        let mut headers = HeaderMap::new();
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+
         let request_builder = client
             .request(method, &self.request_url)
+            .headers(headers)
             .timeout(self.request_timeout);
 
         let request_builder = if let Some(body) = self.request_body.as_ref() {
@@ -139,7 +246,7 @@ impl HealthCheck for ChainHealthCheck {
         let response = match response {
             Ok(r) => r,
             Err(_e) => {
-                log::error!("failed to send request");
+                log::error!("failed to send request, error: {}", _e);
                 return Error::e_explain(Custom("failed to send request"), "reqwest error");
             }
         };
@@ -148,7 +255,7 @@ impl HealthCheck for ChainHealthCheck {
         let response_body = match response_body {
             Ok(b) => b,
             Err(_e) => {
-                log::error!("failed to read response body");
+                log::error!("failed to read response body, error: {}", _e);
                 return Error::e_explain(Custom("failed to read response body"), "reqwest error");
             }
         };
@@ -170,6 +277,9 @@ impl HealthCheck for ChainHealthCheck {
             {
                 let mut state = self.chain_state.lock().unwrap();
                 state.update_block_number(&self.host, chain_state_result);
+
+                // metrics
+                set_node_height_gauge(&state.chain_name, &self.host, chain_state_result);
             }
         }
 
@@ -211,7 +321,7 @@ mod test {
             "https://httpbin.org",
             "/get",
             "GET",
-            Arc::new(Mutex::new(ChainState::new())),
+            Arc::new(Mutex::new(ChainState::new("test"))),
         );
         let backend = Backend {
             addr: SocketAddr::Inet("23.23.165.157:443".parse().unwrap()),
@@ -230,7 +340,7 @@ mod test {
             "https://httpbin.org",
             "/post",
             "POST",
-            Arc::new(Mutex::new(ChainState::new())),
+            Arc::new(Mutex::new(ChainState::new("test"))),
         );
         let http_check = chain_health_check.with_request_body(
             r#"
@@ -257,9 +367,9 @@ mod test {
             "https://practical-green-butterfly.optimism.quiknode.pro",
             "/d02f8d49bde8ccbbcec3c9a8962646db998ade83",
             "POST",
-            Arc::new(Mutex::new(ChainState::new())),
+            Arc::new(Mutex::new(ChainState::new("test"))),
         );
-        let http_check = http_check.with_response_body_validator(Box::new(eth_validator));
+        let http_check = http_check.with_response_body_validator(Arc::new(eth_validator));
         let http_check = http_check.with_request_body(
             r#"
                 {

@@ -29,6 +29,8 @@ pub struct ChainProxyConfig {
     pub interval: u64,
     // block gap, if the cluster block number is block_gap behind the max block number, it's considered unhealthy
     pub block_gap: u64,
+    // chain type, for example, "ethereum", "bitcoin"
+    pub chain_type: String,
 }
 
 fn build_chain_cluster_service<S: BackendSelection>(
@@ -51,36 +53,33 @@ where
     );
 
     // set health check validator and request body according to the chain type
-    // currently we use eth validator for all chains
-    let chain_health_check = chain_health_check
-        .with_response_body_validator(Box::new(crate::service::chain_health_check::eth_validator));
+    if let Some(checker) = crate::service::chain_health_check::get_chain_checker(&chain_config.chain_type) {
+        let chain_health_check = chain_health_check
+            .with_response_body_validator(checker.validator);
 
-    // set eth_blockNumber as the request body
-    let chain_health_check = chain_health_check.with_request_body(
-        r#"
-                {
-                    "jsonrpc":"2.0",
-                    "method":"eth_blockNumber",
-                    "id":1
-               }
-               "#
-        .as_bytes()
-        .to_vec(),
-    );
+        let chain_health_check = chain_health_check.with_request_body(
+            checker.request_body,
+        );
 
-    cluster.set_health_check(chain_health_check);
+        cluster.set_health_check(chain_health_check);
+    } else {
+        // default health check
+        // no validator, no request body
+        cluster.set_health_check(chain_health_check);
+    }
+
     cluster.health_check_frequency = Some(std::time::Duration::from_secs(chain_config.interval));
-
     background_service("cluster health check", cluster)
 }
 
 pub fn new_chain_proxy_service(
+    chain_name: &str,
     server_conf: &Arc<ServerConf>,
     listen_addr: &str,
     host_configs: Vec<ChainProxyConfig>,
 ) -> (impl Service, Vec<Box<dyn Service>>) {
     // first create shared chain state for proxy upstream selection
-    let chain_state = Arc::new(Mutex::new(ChainState::new()));
+    let chain_state = Arc::new(Mutex::new(ChainState::new(chain_name)));
 
     // build a vector of background services from host configs
     let mut cluster_services = Vec::new();
@@ -91,7 +90,7 @@ pub fn new_chain_proxy_service(
         cluster_services.push(Box::new(cluster) as Box<dyn Service>);
     }
 
-    let proxy_app = proxy::ProxyApp::new(host_configs.clone(), clusters, chain_state);
+    let proxy_app = proxy::ProxyApp::new(chain_name.to_string(), host_configs.clone(), clusters, chain_state);
     let mut service = http_proxy_service(server_conf, proxy_app);
     service.add_tcp(listen_addr);
 

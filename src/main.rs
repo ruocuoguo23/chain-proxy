@@ -1,4 +1,5 @@
 use log4rs;
+use clap::Parser;
 use pingora::server::configuration::ServerConf;
 use pingora::{
     server::{configuration::Opt, Server},
@@ -32,6 +33,7 @@ lazy_static! {
 mod app;
 mod config;
 mod service;
+mod metrics;
 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "chain-proxy")]
@@ -72,6 +74,8 @@ fn create_services_from_config(server_conf: &Arc<ServerConf>) -> Vec<Box<dyn Ser
                 }
             };
 
+            let chain_type = chain.chain_type();
+
             let proxy_addr = format!("{}:{}", url.host_str().unwrap(), port);
             let interval = chain.interval();
             let block_gap = chain.block_gap();
@@ -83,6 +87,7 @@ fn create_services_from_config(server_conf: &Arc<ServerConf>) -> Vec<Box<dyn Ser
                 priority: node.priority(),
                 path: chain.health_check().path().to_string(),
                 method: chain.health_check().method().to_string(),
+                chain_type: chain_type.to_string(),
                 interval,
                 block_gap,
             };
@@ -92,6 +97,7 @@ fn create_services_from_config(server_conf: &Arc<ServerConf>) -> Vec<Box<dyn Ser
         }
 
         let (chain_proxy_service, cluster_services) = service::proxy::new_chain_proxy_service(
+            chain.name(),
             server_conf,
             &format!("0.0.0.0:{http_port}"),
             host_configs,
@@ -125,6 +131,9 @@ pub fn main() {
     // Initialize log4rs with the parsed configuration
     log4rs::init_raw_config(config).unwrap();
 
+    // init chain checker
+    service::chain_health_check::init_chain_checker();
+
     // load config
     let chain_opt = ChainOpt::from_args();
     let config_path = chain_opt.config.unwrap_or_else(|| "config.yaml".into());
@@ -142,7 +151,6 @@ pub fn main() {
         "chain-proxy".into(),
         "-c".into(),
         config_path.to_str().unwrap().into(),
-        // "-d".into(),
     ];
 
     // if upgrade flag is set, add it to the opts
@@ -150,8 +158,8 @@ pub fn main() {
         opts.push("-u".into());
     }
 
-    let opt = Some(Opt::from_iter(opts));
-    let mut my_server = Server::new(opt).unwrap();
+    // let opt = Some(Opt::parse_from(opts));
+    let mut my_server = Server::new(Some(Opt::parse_from(opts))).unwrap();
     my_server.bootstrap();
 
     // print the server configuration
@@ -161,5 +169,18 @@ pub fn main() {
     let services: Vec<Box<dyn Service>> = create_services_from_config(&my_server.configuration);
 
     my_server.add_services(services);
+
+    // init metrics
+    metrics::init_metrics(CONFIG.read().unwrap().monitor.system()).unwrap();
+
+    // add prometheus service
+    let monitor_listen = CONFIG.read().unwrap().monitor.listen();
+    let mut prometheus_service_http =
+        pingora::services::listening::Service::prometheus_http_service();
+    prometheus_service_http.add_tcp(format!("0.0.0.0:{monitor_listen}").as_str());
+
+    log::info!("Prometheus service created, listening on {monitor_listen}");
+    my_server.add_service(prometheus_service_http);
+
     my_server.run_forever();
 }
