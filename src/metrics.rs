@@ -9,6 +9,9 @@ pub struct Metrics {
 
     // proxy result counter
     pub proxy_result_counter: CounterVec,
+
+    // node health gauge
+    pub node_health_gauge: GaugeVec,
 }
 
 impl Metrics {
@@ -25,9 +28,16 @@ impl Metrics {
         )
             .unwrap();
 
+        let node_health_gauge = GaugeVec::new(
+            Opts::new("node_health_gauge", "node health gauge").namespace(namespace),
+            &["node", "host"],
+        )
+            .unwrap();
+
         Metrics {
             node_height_gauge,
             proxy_result_counter,
+            node_health_gauge,
         }
     }
 
@@ -35,6 +45,7 @@ impl Metrics {
         let registry = default_registry();
         registry.register(Box::new(self.node_height_gauge.clone()))?;
         registry.register(Box::new(self.proxy_result_counter.clone()))?;
+        registry.register(Box::new(self.node_health_gauge.clone()))?;
 
         Ok(self)
     }
@@ -49,6 +60,13 @@ impl Metrics {
         self.proxy_result_counter
             .with_label_values(&[chain, host, code, method])
             .inc();
+    }
+
+    pub fn set_node_health_gauge(&self, node: &str, host: &str, is_healthy: bool) {
+        let value = if is_healthy { 1.0 } else { 0.0 };
+        self.node_health_gauge
+            .with_label_values(&[node, host])
+            .set(value);
     }
 }
 
@@ -75,6 +93,13 @@ pub fn inc_proxy_result_counter(chain: &str, host: &str, code: &str, method: &st
     let metrics_lock = METRICS.lock().unwrap();
     if let Some(metrics) = &*metrics_lock {
         metrics.inc_proxy_result_counter(chain, host, code, method);
+    }
+}
+
+pub fn set_node_health_gauge(node: &str, host: &str, is_healthy: bool) {
+    let metrics_lock = METRICS.lock().unwrap();
+    if let Some(metrics) = &*metrics_lock {
+        metrics.set_node_health_gauge(node, host, is_healthy);
     }
 }
 

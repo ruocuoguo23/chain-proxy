@@ -4,7 +4,6 @@ use std::error::Error;
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
-use url::{ParseError, Url};
 
 pub const LOG_CONFIG: &str = r#"
 refresh_rate: 30 seconds
@@ -44,17 +43,6 @@ impl Node {
         self.address.as_str()
     }
 
-    pub fn tls(&self) -> bool {
-        self.address.starts_with("https")
-    }
-
-    pub fn hostname(&self) -> Result<String, ParseError> {
-        let url = Url::parse(self.address.as_str())?;
-        url.host_str()
-            .map(|host| host.to_string())
-            .ok_or(ParseError::EmptyHost)
-    }
-
     pub fn priority(&self) -> i32 {
         self.priority
     }
@@ -66,6 +54,8 @@ pub struct HealthCheck {
     path: String,
     #[serde(rename = "Method")]
     method: String,
+    #[serde(rename = "RequestBody", default)]
+    request_body: String,
 }
 
 impl HealthCheck {
@@ -76,12 +66,31 @@ impl HealthCheck {
     pub fn method(&self) -> &str {
         self.method.as_str()
     }
+
+    pub fn request_body(&self) -> &str {
+        self.request_body.as_str()
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SpecialMethodConfig {
+    #[serde(rename = "MethodName")]
+    pub method_name: String,
+    #[serde(rename = "Nodes")]
+    pub nodes: Vec<Node>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Chain {
     #[serde(rename = "Name")]
     name: String,
+
+    // Protocol is used to distinguish different proxy protocol, for example, "http", "jsonrpc"
+    #[serde(rename = "Protocol")]
+    protocol: String,
+
+    // ChainType is used to distinguish different chains, for example, "ethereum", "solana"
+    // different chain may have different health check api
     #[serde(rename = "ChainType")]
     chain_type: String,
     #[serde(rename = "Listen")]
@@ -94,11 +103,17 @@ pub struct Chain {
     nodes: Vec<Node>,
     #[serde(rename = "HealthCheck")]
     health_check: HealthCheck,
+    #[serde(rename = "SpecialMethods")]
+    special_methods: Option<Vec<SpecialMethodConfig>>
 }
 
 impl Chain {
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    pub fn protocol(&self) -> &str {
+        &self.protocol
     }
 
     pub fn chain_type(&self) -> &str {
@@ -124,6 +139,65 @@ impl Chain {
     pub fn health_check(&self) -> &HealthCheck {
         &self.health_check
     }
+
+    pub fn special_methods(&self) -> Option<&Vec<SpecialMethodConfig>> {
+        self.special_methods.as_ref()
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Common {
+    #[serde(rename = "Name")]
+    name: String,
+
+    // Protocol is used to distinguish different proxy protocol, for example, "http", "jsonrpc"
+    #[serde(rename = "Protocol")]
+    protocol: String,
+
+    #[serde(rename = "Listen")]
+    listen: u16,
+
+    #[serde(rename = "Interval")]
+    interval: u64,
+
+    #[serde(rename = "Nodes")]
+    nodes: Vec<Node>,
+
+    #[serde(rename = "HealthCheck")]
+    health_check: HealthCheck,
+
+    #[serde(rename = "SpecialMethods")]
+    special_methods: Option<Vec<SpecialMethodConfig>>,
+}
+
+impl Common {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn protocol(&self) -> &str {
+        &self.protocol
+    }
+
+    pub fn listen(&self) -> u16 {
+        self.listen
+    }
+
+    pub fn interval(&self) -> u64 {
+        self.interval
+    }
+
+    pub fn nodes(&self) -> &Vec<Node> {
+        &self.nodes
+    }
+
+    pub fn health_check(&self) -> &HealthCheck {
+        &self.health_check
+    }
+
+    pub fn special_methods(&self) -> Option<&Vec<SpecialMethodConfig>> {
+        self.special_methods.as_ref()
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Default)]
@@ -146,8 +220,11 @@ impl Monitor {
 
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct Config {
-    #[serde(rename = "Chains")]
+    #[serde(rename = "Chains", default)]
     pub(crate) chains: Vec<Chain>,
+
+    #[serde(rename = "Commons", default)]
+    pub(crate) commons: Vec<Common>,
 
     #[serde(rename = "Monitor")]
     pub(crate) monitor: Monitor,
@@ -192,6 +269,28 @@ impl ChainState {
     }
 }
 
+#[derive(Debug)]
+pub struct NodeState {
+    // store the node name
+    pub(crate) node_name: String,
+
+    // host name and health status
+    pub(crate) health_status: HashMap<String, bool>,
+}
+
+impl NodeState {
+    pub fn new(node_name: &str) -> Self {
+        NodeState {
+            node_name: node_name.to_string(),
+            health_status: HashMap::new(),
+        }
+    }
+
+    pub fn update_health_status(&mut self, host_name: &str, is_healthy: bool) {
+        self.health_status.insert(host_name.to_string(), is_healthy);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::Write;
@@ -211,10 +310,11 @@ mod tests {
         let yaml_content = r#"
 Chains:
   - Name: solana
+    Protocol: "jsonrpc"
     Listen: 1017
     Interval: 20
     BlockGap: 20
-    ChainType: solana
+    ChainType: "solana"
     Nodes:
       - Address: https://example.com/solana
         Priority: 1
@@ -224,17 +324,64 @@ Chains:
       Path: /health1
       Method: GET
   - Name: ethereum
+    Protocol: "jsonrpc"
     Listen: 1090
     Interval: 20
     BlockGap: 20
-    ChainType: ethereum
+    ChainType: "ethereum"
     Nodes:
       - Address: https://example.com/ethereum
         Priority: 1
       - Address: https://api.ethereum.org
         Priority: 0
+    SpecialMethods:
+      - MethodName: "debug_"
+        Nodes:
+          - Address: http://127.0.0.1:22260
+            Priority: 1
+          - Address: https://special-node.infura.io/v3/559af310b68646d8accf0cf36111f2eb
+            Priority: 0
+      - MethodName: "/special"
+        Nodes:
+          - Address: http://127.0.0.1:33360
+            Priority: 1
+          - Address: https://another-special-node.infura.io/v3/559af310b68646d8accf0cf36111f2eb
+            Priority: 0
     HealthCheck:
       Path: /health2
+      Method: GET
+Commons:
+  - Name: common1
+    Protocol: "jsonrpc"
+    Listen: 2020
+    Interval: 30
+    Nodes:
+      - Address: https://example.com/common1
+        Priority: 1
+      - Address: https://api.common1.com
+        Priority: 0
+    HealthCheck:
+      Path: /health3
+      Method: GET
+      RequestBody: "test"
+  - Name: common2
+    Protocol: "jsonrpc"
+    Listen: 2030
+    Interval: 40
+    Nodes:
+      - Address: https://example.com/common2
+        Priority: 1
+      - Address: https://api.common2.com
+        Priority: 0
+    SpecialMethods:
+      - MethodName: "trace_"
+        Nodes:
+          - Address: http://127.0.0.1:44460
+            Priority: 1
+          - Address: https://special-node.common2.com/v3/559af310b68646d8accf0cf36111f2eb
+            Priority: 0
+    HealthCheck:
+      Path: /health4
       Method: GET
 
 Monitor:
@@ -266,5 +413,45 @@ Monitor:
         assert_eq!(config.chains[0].health_check().method(), "GET");
 
         assert_eq!(config.monitor.listen(), 1018);
+
+        // Assert SpecialMethods for ethereum chain
+        let special_methods = config.chains[1].special_methods().unwrap();
+        assert_eq!(special_methods.len(), 2);
+
+        assert_eq!(special_methods[0].nodes.len(), 2);
+        assert_eq!(special_methods[0].nodes[0].address, "http://127.0.0.1:22260");
+        assert_eq!(special_methods[0].nodes[0].priority, 1);
+        assert_eq!(special_methods[0].nodes[1].address, "https://special-node.infura.io/v3/559af310b68646d8accf0cf36111f2eb");
+        assert_eq!(special_methods[0].nodes[1].priority, 0);
+
+        assert_eq!(special_methods[1].nodes.len(), 2);
+        assert_eq!(special_methods[1].nodes[0].address, "http://127.0.0.1:33360");
+        assert_eq!(special_methods[1].nodes[0].priority, 1);
+        assert_eq!(special_methods[1].nodes[1].address, "https://another-special-node.infura.io/v3/559af310b68646d8accf0cf36111f2eb");
+        assert_eq!(special_methods[1].nodes[1].priority, 0);
+
+        // Assert Commons
+        assert_eq!(config.commons.len(), 2);
+        assert_eq!(config.commons[0].name(), "common1");
+        assert_eq!(config.commons[0].listen(), 2020);
+        assert_eq!(config.commons[0].interval(), 30);
+        assert_eq!(config.commons[0].nodes().len(), 2);
+        assert_eq!(
+            config.commons[0].nodes()[0].address,
+            "https://example.com/common1"
+        );
+        assert_eq!(config.commons[0].nodes()[0].priority, 1);
+
+        assert_eq!(config.commons[0].health_check().path(), "/health3");
+        assert_eq!(config.commons[0].health_check().method(), "GET");
+
+        let special_methods_common2 = config.commons[1].special_methods().unwrap();
+        assert_eq!(special_methods_common2.len(), 1);
+
+        assert_eq!(special_methods_common2[0].nodes.len(), 2);
+        assert_eq!(special_methods_common2[0].nodes[0].address, "http://127.0.0.1:44460");
+        assert_eq!(special_methods_common2[0].nodes[0].priority, 1);
+        assert_eq!(special_methods_common2[0].nodes[1].address, "https://special-node.common2.com/v3/559af310b68646d8accf0cf36111f2eb");
+        assert_eq!(special_methods_common2[0].nodes[1].priority, 0);
     }
 }

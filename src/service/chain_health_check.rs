@@ -67,6 +67,13 @@ pub fn init_chain_checker() {
             .to_vec(),
     };
     register_chain_checker("ripple", ripple_checker);
+
+    // register the cosmos chain checker
+    let cosmos_checker = ChainChecker {
+        validator: Arc::new(cosmos_validator),
+        request_body: "".as_bytes().to_vec(),
+    };
+    register_chain_checker("cosmos", cosmos_checker);
 }
 
 /// Define various response validators for different chain, like ethereum, bitcoin, etc.
@@ -141,6 +148,47 @@ pub(crate) fn ripple_validator(body: &[u8]) -> Result<u64> {
     } else {
         Ok(parsed.result.ledger_index)
     }
+}
+
+/// cosmos response and validator
+#[derive(Debug, Serialize, Deserialize)]
+struct CosmosJsonResponse {
+    /// The key to check in the JSON response
+    block: CosmosBlock,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct CosmosBlock {
+    /// The key to check in the JSON response
+    header: CosmosHeader,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct CosmosHeader {
+    /// The key to check in the JSON response
+    height: String,
+}
+
+pub(crate) fn cosmos_validator(body: &[u8]) -> Result<u64> {
+    // try to parse the JSON response
+    let parsed: Result<CosmosJsonResponse, serde_json::Error> = serde_json::from_slice(body);
+    if parsed.is_err() {
+        // log the body
+        log::error!("failed to parse json: {}", String::from_utf8_lossy(body));
+        return Error::e_explain(Custom("invalid json"), "during http healthcheck");
+    }
+
+    let parsed = parsed.unwrap();
+
+    // from string to u64
+    let block_number = parsed.block.header.height.parse::<u64>();
+    if block_number.is_err() {
+        // log the body
+        log::error!("failed to parse json: {}", String::from_utf8_lossy(body));
+        return Error::e_explain(Custom("invalid block number"), "during http healthcheck");
+    }
+
+    Ok(block_number.unwrap())
 }
 
 /// Chain health check
@@ -272,7 +320,7 @@ impl HealthCheck for ChainHealthCheck {
             }
 
             // update the chain state
-            let chain_state_result = chain_state_result.unwrap();
+            let chain_state_result = chain_state_result?;
 
             {
                 let mut state = self.chain_state.lock().unwrap();

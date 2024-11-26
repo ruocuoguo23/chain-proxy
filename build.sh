@@ -15,9 +15,8 @@ cargo build --release
 if [ $? -eq 0 ]; then
     echo "Build successful."
 
-    # Get the project name
-    # shellcheck disable=SC2046
-    PROJECT_NAME=$(basename $(pwd))
+    # Set the project name
+    PROJECT_NAME="chain-proxy"
 
     # Set the path to the release binary
     RELEASE_BINARY="target/release/$PROJECT_NAME"
