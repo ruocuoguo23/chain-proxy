@@ -20,7 +20,7 @@ static GLOBAL: jemallocator::Jemalloc = jemallocator::Jemalloc;
 #[macro_use]
 extern crate lazy_static;
 
-use crate::config::{Config, Node, Chain, Common};
+use crate::config::{Config, Node, Chain, Common, UnifyProxyConfig};
 use crate::config::LOG_CONFIG;
 use std::path::PathBuf;
 use std::sync::RwLock;
@@ -69,6 +69,10 @@ fn create_chain_proxy_config(node: &Node, chain: &Chain) -> Option<service::prox
         chain_type: chain.chain_type().to_string(),
         interval: chain.interval(),
         block_gap: chain.block_gap(),
+        log_request_detail: chain.log_request(),
+        username: node.user_name().cloned(), // Pass the optional username
+        password: node.pass().cloned(),     // Pass the optional password
+        custom_headers: node.custom_headers().cloned(),
     })
 }
 
@@ -94,6 +98,10 @@ fn create_common_proxy_config(node: &Node, common: &Common) -> Option<service::p
         interval: common.interval(),
         block_gap: 0,
         chain_type: "".to_string(),
+        log_request_detail: common.log_request(),
+        username: node.user_name().cloned(), // Pass the optional username
+        password: node.pass().cloned(),     // Pass the optional password
+        custom_headers: node.custom_headers().cloned(),
     })
 }
 
@@ -141,15 +149,24 @@ fn create_services_from_config(server_conf: &Arc<ServerConf>) -> Vec<Box<dyn Ser
             }
         }
 
-
-        let (chain_proxy_service, cluster_services) = service::proxy::new_chain_proxy_service(
-            chain.name(),
-            chain.protocol(),
-            server_conf,
-            &format!("0.0.0.0:{http_port}"),
-            host_configs,
-            special_method_configs,
-        );
+        let (chain_proxy_service, cluster_services) = if chain.protocol() == "grpc" {
+            service::proxy::new_grpc_chain_proxy_service(
+                chain.name(),
+                server_conf,
+                &format!("0.0.0.0:{http_port}"),
+                host_configs,
+                special_method_configs,
+            )
+        } else {
+            service::proxy::new_chain_proxy_service(
+                chain.name(),
+                chain.protocol(),
+                server_conf,
+                &format!("0.0.0.0:{http_port}"),
+                host_configs,
+                special_method_configs,
+            )
+        };
 
         let chain_name = chain.name();
         // print chain proxy info
@@ -162,7 +179,7 @@ fn create_services_from_config(server_conf: &Arc<ServerConf>) -> Vec<Box<dyn Ser
             chain.block_gap()
         );
 
-        services.push(Box::new(chain_proxy_service));
+        services.push(chain_proxy_service);
         for cluster_service in cluster_services {
             services.push(cluster_service);
         }
@@ -230,6 +247,11 @@ fn create_services_from_config(server_conf: &Arc<ServerConf>) -> Vec<Box<dyn Ser
             services.push(cluster_service);
         }
     }
+
+    // create unified proxy service
+    let unify_config = UnifyProxyConfig::from_config(&config);
+    let unify_proxy = service::proxy::new_unify_proxy_service(server_conf, unify_config);
+    services.push(Box::new(unify_proxy));
 
     services
 }

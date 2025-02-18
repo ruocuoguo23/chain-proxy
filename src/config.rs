@@ -16,13 +16,13 @@ appenders:
     policy:
       kind: compound
       trigger:
-        kind: size
-        limit: 10mb # when the file size exceeds 10mb, a rollover will be triggered
+        kind: time
+        interval: 1 day # rotate log file every day
       roller:
         kind: fixed_window
         pattern: "logs/chain_proxy.{}.log"
         base: 1
-        count: 5
+        count: 10 # ten days logs will be kept
 root:
   level: info
   appenders:
@@ -36,6 +36,12 @@ pub struct Node {
     address: String,
     #[serde(rename = "Priority")]
     priority: i32,
+    #[serde(rename = "UserName", default)]
+    user_name: Option<String>,
+    #[serde(rename = "Pass", default)]
+    pass: Option<String>,
+    #[serde(rename = "CustomHeaders", default)]
+    custom_headers: Option<HashMap<String, String>>, // New field for custom headers
 }
 
 impl Node {
@@ -45,6 +51,18 @@ impl Node {
 
     pub fn priority(&self) -> i32 {
         self.priority
+    }
+
+    pub fn user_name(&self) -> Option<&String> {
+        self.user_name.as_ref()
+    }
+
+    pub fn pass(&self) -> Option<&String> {
+        self.pass.as_ref()
+    }
+
+    pub fn custom_headers(&self) -> Option<&HashMap<String, String>> {
+        self.custom_headers.as_ref()
     }
 }
 
@@ -99,6 +117,11 @@ pub struct Chain {
     interval: u64,
     #[serde(rename = "BlockGap")]
     block_gap: u64,
+
+    // LogRequest is used to log the request and response, default is false
+    #[serde(rename = "LogRequest", default)]
+    log_request: bool,
+
     #[serde(rename = "Nodes")]
     nodes: Vec<Node>,
     #[serde(rename = "HealthCheck")]
@@ -132,6 +155,10 @@ impl Chain {
         self.block_gap
     }
 
+    pub fn log_request(&self) -> bool {
+        self.log_request
+    }
+
     pub fn nodes(&self) -> &Vec<Node> {
         &self.nodes
     }
@@ -160,6 +187,10 @@ pub struct Common {
     #[serde(rename = "Interval")]
     interval: u64,
 
+    // LogRequest is used to log the request and response, default is false
+    #[serde(rename = "LogRequest", default)]
+    log_request: bool,
+
     #[serde(rename = "Nodes")]
     nodes: Vec<Node>,
 
@@ -185,6 +216,10 @@ impl Common {
 
     pub fn interval(&self) -> u64 {
         self.interval
+    }
+
+    pub fn log_request(&self) -> bool {
+        self.log_request
     }
 
     pub fn nodes(&self) -> &Vec<Node> {
@@ -228,6 +263,9 @@ pub struct Config {
 
     #[serde(rename = "Monitor")]
     pub(crate) monitor: Monitor,
+
+    #[serde(rename = "UnifyProxyListenPort", default)]
+    pub(crate) unify_proxy_listen_port: Option<u16>,
 }
 
 impl Config {
@@ -288,6 +326,49 @@ impl NodeState {
 
     pub fn update_health_status(&mut self, host_name: &str, is_healthy: bool) {
         self.health_status.insert(host_name.to_string(), is_healthy);
+    }
+}
+
+/// Stores mapping of `chain_type -> chain_name -> port`
+#[derive(Debug, Clone)]
+pub struct UnifyProxyConfig {
+    chain_ports: HashMap<String, HashMap<String, u16>>, // chain_type -> chain_name -> port
+
+    listen_port: u16, // port for the proxy
+}
+
+impl UnifyProxyConfig {
+    /// Create a new `UnifyProxyConfig` from `Config`
+    pub fn from_config(config: &Config) -> Self {
+        let mut chain_ports = HashMap::new();
+
+        for chain in &config.chains {
+            let chain_type = chain.chain_type().to_string();
+            let chain_name = chain.name().to_string();
+            let port = chain.listen();
+
+            chain_ports
+                .entry(chain_type)
+                .or_insert_with(HashMap::new)
+                .insert(chain_name, port);
+        }
+
+        let listen_port = config.unify_proxy_listen_port.unwrap_or(9999);
+
+        UnifyProxyConfig { chain_ports, listen_port }
+    }
+
+    /// Get the port for a given `chain_type` and `chain_name`
+    pub fn get_port(&self, chain_type: &str, chain_name: &str) -> Option<u16> {
+        self.chain_ports
+            .get(chain_type)
+            .and_then(|chains| chains.get(chain_name))
+            .cloned()
+    }
+
+    /// Get the listen port for the unified proxy
+    pub fn listen_port(&self) -> u16 {
+        self.listen_port
     }
 }
 

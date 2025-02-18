@@ -1,40 +1,32 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use async_trait::async_trait;
-use bytes::{Bytes};
-
-use pingora_proxy::{ProxyHttp, Session};
+use bytes::Bytes;
 use pingora::{
-    upstreams::peer::{HttpPeer},
-    Error,
-    Custom,
-    Result
+    upstreams::peer::HttpPeer,
+    Error, Custom, Result,
 };
 use pingora_load_balancing::LoadBalancer;
 use pingora_load_balancing::prelude::RoundRobin;
+use pingora_proxy::{ProxyHttp, Session};
+use pingora_core::modules::http::{
+    grpc_web::{GrpcWeb, GrpcWebBridge},
+    HttpModules,
+};
 use crate::service::proxy::{ChainProxyConfig, SpecialMethodConfig};
-use crate::app::proxy_base::{ProxyBase, ProxyCtx};
+use crate::app::proxy_base::{ProxyCtx, ProxyBase};
 use crate::app::proxy_utils;
 
-pub struct CommonProxyApp {
+pub struct GrpcNodeProxyApp {
     chain_name: String,
-
     protocol: String,
-
     log_request_detail: bool,
-
-    // currently we only support two clusters, maybe with different priority
-    // key is the host name, value is the cluster
     clusters: HashMap<String, Arc<LoadBalancer<RoundRobin>>>,
-
-    // host configs
     host_configs: Vec<ChainProxyConfig>,
-
-    // special method configs
     special_method_configs: Vec<SpecialMethodConfig>,
 }
 
-impl CommonProxyApp {
+impl GrpcNodeProxyApp {
     pub fn new(
         chain_name: String,
         protocol: String,
@@ -43,7 +35,7 @@ impl CommonProxyApp {
         special_method_configs: Vec<SpecialMethodConfig>,
         clusters: HashMap<String, Arc<LoadBalancer<RoundRobin>>>,
     ) -> Self {
-        CommonProxyApp {
+        GrpcNodeProxyApp {
             chain_name,
             protocol,
             log_request_detail,
@@ -55,7 +47,7 @@ impl CommonProxyApp {
 }
 
 #[async_trait]
-impl ProxyBase for CommonProxyApp {
+impl ProxyBase for GrpcNodeProxyApp {
     fn get_clusters(&self) -> &HashMap<String, Arc<LoadBalancer<RoundRobin>>> {
         &self.clusters
     }
@@ -65,24 +57,24 @@ impl ProxyBase for CommonProxyApp {
     }
 
     #[allow(elided_named_lifetimes)]
-    async fn get_eligible_clusters(&self, session: &mut Session) -> Result<HashMap<i32, Vec<&ChainProxyConfig>>> {
-        if let Some(result) = self.get_clusters_by_special_method(session).await {
-            return result;
-        }
-
-        // if not a special method, find the eligible clusters by other criteria
+    async fn get_eligible_clusters(&self, _session: &mut Session) -> Result<HashMap<i32, Vec<&ChainProxyConfig>>> {
         let mut clusters_by_priority: HashMap<i32, Vec<&ChainProxyConfig>> = HashMap::new();
-        for config in self.host_configs.iter() {
-            clusters_by_priority.entry(config.priority).or_insert_with(Vec::new).push(config);
-        }
 
-        if clusters_by_priority.is_empty() {
+        // just get the first config
+        if let Some(first_config) = self.host_configs.first() {
+            clusters_by_priority
+                .entry(first_config.priority)
+                .or_insert_with(Vec::new)
+                .push(first_config);
+        } else {
+            // if no config found, return error
             log::error!("No eligible cluster found");
             return Error::e_explain(Custom("No eligible cluster found"), "proxy error");
         }
 
         Ok(clusters_by_priority)
     }
+
 
     fn get_protocol(&self) -> &str {
         &self.protocol
@@ -94,19 +86,42 @@ impl ProxyBase for CommonProxyApp {
 }
 
 #[async_trait]
-impl ProxyHttp for CommonProxyApp {
+impl ProxyHttp for GrpcNodeProxyApp {
     type CTX = ProxyCtx;
-    fn new_ctx(&self) -> Self::CTX{
+
+    fn new_ctx(&self) -> Self::CTX {
         ProxyCtx {
             request_body: Vec::new(),
             response_body: Vec::new(),
         }
     }
 
-    async fn upstream_peer(&self,
-                           session: &mut Session,
-                           _ctx: &mut Self::CTX
+    fn init_downstream_modules(&self, modules: &mut HttpModules) {
+        // add gRPC Web module
+        modules.add_module(Box::new(GrpcWeb));
+    }
+
+    async fn early_request_filter(
+        &self,
+        session: &mut Session,
+        _ctx: &mut Self::CTX,
+    ) -> Result<()> {
+        let grpc = session
+            .downstream_modules_ctx
+            .get_mut::<GrpcWebBridge>()
+            .expect("GrpcWebBridge module added");
+
+        // init gRPC Web bridge module
+        grpc.init();
+        Ok(())
+    }
+
+    async fn upstream_peer(
+        &self,
+        session: &mut Session,
+        _ctx: &mut Self::CTX,
     ) -> Result<Box<HttpPeer>> {
+        // call the base upstream_peer method
         ProxyBase::upstream_peer(self, session).await
     }
 
@@ -116,11 +131,7 @@ impl ProxyHttp for CommonProxyApp {
         body: &mut Option<Bytes>,
         _end_of_stream: bool,
         ctx: &mut Self::CTX,
-    ) -> Result<()>
-    where
-        Self::CTX: Send + Sync,
-    {
-        // only log request detail should we need to log the request body
+    ) -> Result<()> {
         if self.log_request_detail {
             proxy_utils::request_body_filter(body, ctx).await
         } else {
@@ -128,7 +139,6 @@ impl ProxyHttp for CommonProxyApp {
         }
     }
 
-    // response body
     fn upstream_response_body_filter(
         &self,
         _session: &mut Session,
@@ -141,7 +151,12 @@ impl ProxyHttp for CommonProxyApp {
         }
     }
 
-    async fn logging(&self, session: &mut Session, e: Option<&Error>, ctx: &mut Self::CTX) {
+    async fn logging(
+        &self,
+        session: &mut Session,
+        e: Option<&Error>,
+        ctx: &mut Self::CTX,
+    ) {
         ProxyBase::metrics(self, session);
 
         if self.log_request_detail {

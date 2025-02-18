@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use log::{debug, info};
 use async_trait::async_trait;
-
+use bytes::{Bytes};
 use pingora_proxy::ProxyHttp;
 use pingora::{
     upstreams::peer::{HttpPeer},
@@ -15,12 +15,15 @@ use pingora_load_balancing::prelude::RoundRobin;
 use pingora_proxy::Session;
 use crate::config::ChainState;
 use crate::service::proxy::{ChainProxyConfig, SpecialMethodConfig};
-use crate::app::proxy_base::ProxyBase;
+use crate::app::proxy_base::{ProxyCtx, ProxyBase};
+use crate::app::proxy_utils;
 
 pub struct NodeProxyApp {
     chain_name: String,
 
     protocol: String,
+
+    log_request_detail: bool,
 
     // currently we only support two clusters, maybe with different priority
     // key is the host name, value is the cluster
@@ -40,6 +43,7 @@ impl NodeProxyApp {
     pub fn new(
         chain_name: String,
         protocol: String,
+        log_request_detail: bool,
         host_configs: Vec<ChainProxyConfig>,
         special_method_configs: Vec<SpecialMethodConfig>,
         clusters: HashMap<String, Arc<LoadBalancer<RoundRobin>>>,
@@ -48,6 +52,7 @@ impl NodeProxyApp {
         NodeProxyApp {
             chain_name,
             protocol,
+            log_request_detail,
             clusters,
             host_configs,
             special_method_configs,
@@ -66,6 +71,7 @@ impl ProxyBase for NodeProxyApp {
         &self.chain_name
     }
 
+    #[allow(elided_named_lifetimes)]
     async fn get_eligible_clusters(&self, session: &mut Session) -> Result<HashMap<i32, Vec<&ChainProxyConfig>>> {
         if let Some(result) = self.get_clusters_by_special_method(session).await {
             return result;
@@ -134,14 +140,58 @@ impl ProxyBase for NodeProxyApp {
 
 #[async_trait]
 impl ProxyHttp for NodeProxyApp {
-    type CTX = ();
-    fn new_ctx(&self) {}
-
-    async fn upstream_peer(&self, session: &mut Session, ctx: &mut ()) -> Result<Box<HttpPeer>> {
-        ProxyBase::upstream_peer(self, session, ctx).await
+    type CTX = ProxyCtx;
+    fn new_ctx(&self) -> Self::CTX{
+        ProxyCtx {
+            request_body: Vec::new(),
+            response_body: Vec::new(),
+        }
     }
 
-    async fn logging(&self, session: &mut Session, e: Option<&Error>, ctx: &mut Self::CTX) {
-        ProxyBase::logging(self, session, e, ctx).await
+    async fn upstream_peer(&self,
+                           session: &mut Session,
+                           _ctx: &mut Self::CTX) -> Result<Box<HttpPeer>> {
+        ProxyBase::upstream_peer(self, session).await
+    }
+
+    async fn request_body_filter(
+        &self,
+        _session: &mut Session,
+        body: &mut Option<Bytes>,
+        _end_of_stream: bool,
+        ctx: &mut Self::CTX) -> Result<()>
+    where
+        Self::CTX: Send + Sync,
+    {
+        // only log request detail should we need to log the request body
+        if self.log_request_detail {
+            proxy_utils::request_body_filter(body, ctx).await
+        } else {
+            Ok(())
+        }
+    }
+
+    // response body
+    fn upstream_response_body_filter(
+        &self,
+        _session: &mut Session,
+        body: &mut Option<Bytes>,
+        _end_of_stream: bool,
+        ctx: &mut Self::CTX) {
+        if self.log_request_detail {
+            proxy_utils::upstream_response_body_filter(body, ctx)
+        }
+    }
+
+    async fn logging(
+        &self, session:
+        &mut Session,
+        e: Option<&Error>,
+        ctx: &mut Self::CTX) {
+        ProxyBase::metrics(self, session);
+
+        if self.log_request_detail {
+            proxy_utils::logging(session, e, ctx).await
+        }
     }
 }

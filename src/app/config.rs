@@ -23,7 +23,6 @@ pub const DEFAULT_PEER_OPTIONS: PeerOptions = PeerOptions {
     alternative_cn: None,
     alpn: ALPN::H1,
     ca: None,
-    no_header_eos: false,
     h2_ping_interval: None,
     max_h2_streams: 5,
     extra_proxy_headers: BTreeMap::new(),
@@ -32,4 +31,5 @@ pub const DEFAULT_PEER_OPTIONS: PeerOptions = PeerOptions {
     tracer: None,
     dscp: None,
     tcp_fast_open: false,
+    custom_l4: None,
 };

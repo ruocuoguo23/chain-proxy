@@ -4,6 +4,23 @@ grace_period_seconds: 10
 pid_file: /tmp/chain-proxy.pid
 upgrade_sock: /tmp/chain-proxy.sock
 Chains:
+  - Name: optimism
+    Protocol: "jsonrpc"
+    Listen: 8017
+    Interval: 15
+    BlockGap: 50
+    ChainType: "ethereum"
+    Nodes:
+      - Address: https://green-muddy-pallet.optimism-sepolia.quiknode.pro/60e03ba3943ac4f308f0889405cd20fba8321f9b
+        Priority: 1
+    SpecialMethods:
+      - MethodName: "eth_blockNumber"
+        Nodes:
+          - Address: https://optimism-sepolia.infura.io/v3/559af310b68646d8accf0cf36111f2eb
+            Priority: 0
+    HealthCheck:
+      Path: ""
+      Method: POST
   - Name: ripple
     Protocol: "jsonrpc"
     Listen: 8018
@@ -11,15 +28,157 @@ Chains:
     BlockGap: 50
     ChainType: "ripple"
     Nodes:
-      - Address: http://10.19.18.143:5005
-        Priority: 2
       - Address: https://s2.ripple.com:51234/
         Priority: 1
       - Address: https://s1.ripple.com:51234/
+        Priority: 0
+    HealthCheck:
+      Path: ""
+      Method: POST
+  - Name: cosmos
+    Protocol: "http"
+    Listen: 8019
+    Interval: 30
+    BlockGap: 50
+    ChainType: "cosmos"
+    Nodes:
+      - Address: https://cosmos-rest.publicnode.com
+        Priority: 1
+    HealthCheck:
+      Path: "/cosmos/base/tendermint/v1beta1/blocks/latest"
+      Method: GET
+  - Name: core
+    Protocol: "jsonrpc"
+    Listen: 8020
+    Interval: 15
+    BlockGap: 100
+    ChainType: "ethereum"
+    Nodes:
+      - Address: https://core.public-rpc.com
+        Priority: 0
+      - Address: https://1rpc.io/core
+        Priority: 1
+      - Address: https://rpc.ankr.com/core/d81edae614e6ff96f295baf03da9276f697e82c871a2af207bf4644d06a7c437
+        Priority: 0
+    HealthCheck:
+      Path: ""
+      Method: POST
+  - Name: cardano
+    Protocol: "http"
+    Listen: 8023
+    Interval: 15
+    BlockGap: 20
+    ChainType: "cardano"
+    Nodes:
+      - Address: https://go.getblock.io/ad5331a2e9d1472087ada35a0aa92027
+        Priority: 2
+    HealthCheck:
+      Path: "/network/status"
+      Method: POST
+  - Name: tron
+    Protocol: "http"
+    Listen: 8024
+    Interval: 30
+    BlockGap: 50
+    ChainType: "tron"
+    Nodes:
+      - Address: https://powerful-twilight-arrow.tron-mainnet.quiknode.pro/e0781e6be5778abb5dc50e78823767e81c557c7d
+        Priority: 1
+    HealthCheck:
+      Path: "/walletsolidity/getnowblock"
+      Method: POST
+  - Name: tron_grpc
+    Protocol: "grpc"
+    Listen: 8025
+    Interval: 30
+    BlockGap: 50
+    ChainType: "tron_grpc"
+    Nodes:
+#      - Address: 18.196.99.16:50061
+      - Address: http://127.0.0.1:50051
         Priority: 1
     HealthCheck:
       Path: ""
       Method: POST
+  - Name: stellar
+    Protocol: "http"
+    Listen: 8026
+    Interval: 30
+    BlockGap: 50
+    ChainType: "stellar"
+    Nodes:
+      - Address: https://few-polished-leaf.stellar-mainnet.quiknode.pro/4f253f8968995e3425243084f2be7efb78d91944
+        Priority: 1
+        UserName: "bitcoinrpc"
+        Pass: "BA2z8yPRLp2VCMdsdWkUBtqUvvioWasLrHqu88cNK1234"
+        CustomHeaders:
+          x-algo-api-token: "1d26ff49d43e0c53c34702fbdb3b579127b962f5572d0ab59d24fa3be93dcd51n"
+    HealthCheck:
+      Path: "/ledgers?order=desc&limit=1"
+      Method: GET
+  - Name: ton
+    Protocol: "http"
+    Listen: 8027
+    Interval: 30
+    BlockGap: 50
+    ChainType: "ton"
+    Nodes:
+      - Address: https://toncenter.com
+        Priority: 1
+        CustomHeaders:
+          x-api-key: "16397ec8f8e6682671db97e2ad5ea156d08297317f613c0e92fbe634bb4ecdc8"
+    HealthCheck:
+      Path: "/api/v2/getMasterchainInfo"
+      Method: GET
+  - Name: avail
+    Protocol: "jsonrpc"
+    Listen: 8028
+    Interval: 15
+    BlockGap: 50
+    ChainType: "polkadot"
+    Nodes:
+      - Address: https://mainnet.avail-rpc.com
+        Priority: 1
+    HealthCheck:
+      Path: ""
+      Method: POST
+  - Name: astar
+    Protocol: "jsonrpc"
+    Listen: 8029
+    Interval: 15
+    BlockGap: 50
+    ChainType: "polkadot"
+    Nodes:
+      - Address: https://astar.api.onfinality.io/public
+        Priority: 1
+    HealthCheck:
+      Path: ""
+      Method: POST
+Commons:
+  - Name: optimism_aa
+    Protocol: "jsonrpc"
+    Listen: 9017
+    Interval: 15
+    LogRequest: true
+    Nodes:
+      - Address: https://green-muddy-pallet.optimism-sepolia.quiknode.pro/60e03ba3943ac4f308f0889405cd20fba8321f9b
+        Priority: 1
+      - Address: http://10.203.22.224:3000
+        Priority: 0
+    HealthCheck:
+      Path: ""
+      Method: POST
+      RequestBody: '{"jsonrpc":"2.0","method":"eth_supportedEntryPoints","id":1}'
+    SpecialMethods:
+      - MethodName: "eth_estimateUserOperationGas"
+        Nodes:
+          - Address: http://10.203.22.224:3000
+            Priority: 0
+      - MethodName: "eth_sendUserOperation"
+        Nodes:
+          - Address: http://10.203.22.224:3000
+            Priority: 0
 Monitor:
     Listen: 7899
     System: "wallet"
+UnifyProxyListenPort: 9988
